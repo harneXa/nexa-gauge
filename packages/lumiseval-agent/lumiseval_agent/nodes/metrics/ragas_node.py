@@ -8,12 +8,13 @@ Skipped gracefully if no context is found (scores would be meaningless).
 TODO: Wire LiteLLM as the judge LLM inside RAGAS so billing is unified.
 """
 
-import logging
 from typing import Optional
 
 from lumiseval_core.types import EvidenceResult, RAGASMetricResult
 
-logger = logging.getLogger(__name__)
+from lumiseval_agent.log import get_node_logger
+
+log = get_node_logger("ragas")
 
 
 def run(
@@ -37,15 +38,18 @@ def run(
     """
     passages = [p.text for er in evidence_results for p in er.passages]
     if not passages:
-        logger.info("RAGAS skipped: no retrieved context passages available.")
+        log.warning("No retrieved context passages — RAGAS skipped (scores would be meaningless)")
         return RAGASMetricResult()
+
+    log.info(f"Evaluating against {len(passages)} retrieved passage(s)")
 
     try:
         from datasets import Dataset
         from ragas import evaluate
-        from ragas.metrics import Faithfulness, AnswerRelevancy
+        from ragas.metrics import AnswerRelevancy, Faithfulness
 
         metrics = [Faithfulness(), AnswerRelevancy()]
+        log.info("Running Faithfulness + AnswerRelevancy")
 
         data = {
             "question": [question or ""],
@@ -54,11 +58,16 @@ def run(
         }
         if ground_truth:
             data["ground_truth"] = [ground_truth]
+            log.info("ground_truth provided → context_recall enabled")
 
         dataset = Dataset.from_dict(data)
         result = evaluate(dataset, metrics=metrics)
         scores = result.to_pandas().iloc[0].to_dict()
 
+        log.success(
+            f"faithfulness={scores.get('faithfulness')}  "
+            f"answer_relevancy={scores.get('answer_relevancy')}"
+        )
         return RAGASMetricResult(
             faithfulness=scores.get("faithfulness"),
             answer_relevancy=scores.get("answer_relevancy"),
@@ -66,5 +75,5 @@ def run(
             context_recall=scores.get("context_recall"),
         )
     except Exception as exc:
-        logger.error("RAGAS evaluation failed: %s", exc)
+        log.error(f"RAGAS evaluation failed: {exc}")
         return RAGASMetricResult(error=str(exc))

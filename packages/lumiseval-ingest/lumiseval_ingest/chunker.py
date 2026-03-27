@@ -13,7 +13,6 @@ import hashlib
 
 import semchunk
 import tiktoken
-
 from lumiseval_core.types import Chunk
 
 _ENCODING = tiktoken.get_encoding("cl100k_base")

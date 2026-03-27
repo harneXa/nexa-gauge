@@ -8,12 +8,13 @@ and a GISKARD_NOT_AVAILABLE warning — does not raise.
 TODO: Map Giskard scan categories to the LumisEval adversarial probe enum.
 """
 
-import logging
 from typing import Optional
 
 from lumiseval_core.types import GiskardScanResult, GiskardVulnerability, Severity
 
-logger = logging.getLogger(__name__)
+from lumiseval_agent.log import get_node_logger
+
+log = get_node_logger("giskard")
 
 DEFAULT_PROBE_CATEGORIES = [
     "prompt_injection",
@@ -43,15 +44,13 @@ def run(
     try:
         import giskard  # noqa: F401
     except ImportError:
-        logger.warning(
-            "Giskard is not installed. Adversarial probe coverage is reduced. "
-            "Install with: uv add giskard"
-        )
+        log.warning("Giskard not installed — adversarial coverage reduced. Install: uv add giskard")
         return GiskardScanResult(
             giskard_available=False,
             error="GISKARD_NOT_AVAILABLE",
         )
 
+    log.info(f"Probing categories: {probe_categories}")
     try:
         import giskard
 
@@ -70,22 +69,23 @@ def run(
 
         scan_results = giskard.scan(model, only=probe_categories)
         issues = scan_results.issues if hasattr(scan_results, "issues") else []
+        log.info(f"Scan complete — {len(issues)} issue(s) found")
 
         vulnerabilities = []
         for issue in issues:
-            vulnerabilities.append(
-                GiskardVulnerability(
-                    probe_type=str(getattr(issue, "group", "unknown")),
-                    severity=_map_severity(getattr(issue, "level", "MEDIUM")),
-                    description=str(getattr(issue, "description", "")),
-                    reproduction_details=str(getattr(issue, "examples", "")),
-                )
+            vuln = GiskardVulnerability(
+                probe_type=str(getattr(issue, "group", "unknown")),
+                severity=_map_severity(getattr(issue, "level", "MEDIUM")),
+                description=str(getattr(issue, "description", "")),
+                reproduction_details=str(getattr(issue, "examples", "")),
             )
+            vulnerabilities.append(vuln)
+            log.info(f"  [{vuln.severity.value}] {vuln.probe_type}: {vuln.description[:80]}")
 
         return GiskardScanResult(vulnerabilities=vulnerabilities)
 
     except Exception as exc:
-        logger.error("Giskard scan failed: %s", exc)
+        log.error(f"Giskard scan failed: {exc}")
         return GiskardScanResult(error=str(exc))
 
 

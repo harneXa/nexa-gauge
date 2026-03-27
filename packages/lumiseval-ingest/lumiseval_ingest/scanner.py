@@ -6,14 +6,12 @@ TODO: Implement full dataset scanning logic.
 """
 
 import csv
-import hashlib
 import json
 import math
 from pathlib import Path
 from typing import Any
 
 import tiktoken
-
 from lumiseval_core.errors import InputParseError
 from lumiseval_core.types import InputMetadata
 

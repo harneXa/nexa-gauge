@@ -15,10 +15,9 @@ TODO:
 import uuid
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-
 from lumiseval_agent.graph import run_graph
 from lumiseval_core.types import EvalJobConfig, EvalReport, RubricRule
+from pydantic import BaseModel
 
 app = FastAPI(
     title="LumisEval API",

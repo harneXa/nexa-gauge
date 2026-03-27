@@ -25,6 +25,10 @@ from lumiseval_core.types import (
     RubricEvalResult,
 )
 
+from lumiseval_agent.log import get_node_logger
+
+log = get_node_logger("aggregation")
+
 
 def aggregate(
     job_id: str,
@@ -38,6 +42,7 @@ def aggregate(
     job_config: EvalJobConfig,
 ) -> EvalReport:
     """Assemble all metric results into a final EvalReport."""
+    log.info(f"score_weights={job_config.score_weights}")
     weights = job_config.score_weights
     warnings: list[str] = []
 
@@ -46,9 +51,7 @@ def aggregate(
 
     # Hallucination rate (fraction of claims that are CONTRADICTED or UNVERIFIABLE)
     if claim_verdicts:
-        non_supported = sum(
-            1 for v in claim_verdicts if v.verdict != ClaimVerdict.SUPPORTED
-        )
+        non_supported = sum(1 for v in claim_verdicts if v.verdict != ClaimVerdict.SUPPORTED)
         hallucination_rate = non_supported / len(claim_verdicts)
     else:
         hallucination_rate = None
@@ -80,13 +83,16 @@ def aggregate(
     if components:
         total_weight = sum(w for w, _ in components)
         composite_score = sum(w * s for w, s in components) / total_weight
+        log.info(
+            f"faithfulness={faithfulness}  "
+            f"hallucination_rate={hallucination_rate}  "
+            f"rubric_score={rubric_score}  "
+            f"safety_score={safety_score}"
+        )
+        log.info(f"composite_score={composite_score:.4f}  (from {len(components)} component(s))")
 
     # Confidence band — std dev of per-claim retrieval scores
-    retrieval_scores = [
-        p.retrieval_score
-        for v in claim_verdicts
-        for p in v.passages
-    ]
+    retrieval_scores = [p.retrieval_score for v in claim_verdicts for p in v.passages]
     confidence_band: Optional[float] = None
     if len(retrieval_scores) >= 2:
         confidence_band = statistics.stdev(retrieval_scores)
@@ -101,9 +107,7 @@ def aggregate(
     if cost_estimate and cost_estimate.approximate_warning:
         warnings.append(cost_estimate.approximate_warning)
 
-    evaluation_incomplete = (
-        ragas is None and deepeval is None and not claim_verdicts
-    )
+    evaluation_incomplete = ragas is None and deepeval is None and not claim_verdicts
 
     return EvalReport(
         job_id=job_id,

@@ -7,10 +7,9 @@ already-selected claim are discarded.
 """
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
-
 from lumiseval_core.config import config
 from lumiseval_core.types import Claim
+from sentence_transformers import SentenceTransformer
 
 _SIMILARITY_THRESHOLD = 0.9
 _LAMBDA = 0.5

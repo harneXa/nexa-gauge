@@ -1,4 +1,3 @@
-import os
 from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -7,7 +6,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Config(BaseSettings):
     """Central config — all values sourced from environment variables."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        env_ignore_empty=True,  # treat empty string env vars as unset (avoids float/int coercion errors)
+    )
+
+    print("Config initialized: ", model_config)
 
     # Runtime environment
     ENV: str = "development"

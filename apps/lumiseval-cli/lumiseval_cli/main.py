@@ -12,20 +12,18 @@ TODO:
   - Interactive cost confirmation prompt before long runs.
 """
 
-import json
 import sys
 import uuid
 from pathlib import Path
 from typing import Optional
 
 import typer
-from rich.console import Console
-from rich.table import Table
-
 from lumiseval_agent.graph import run_graph
 from lumiseval_agent.nodes.cost_estimator import estimate as compute_estimate
 from lumiseval_core.types import EvalJobConfig
 from lumiseval_ingest.scanner import scan_file, scan_text
+from rich.console import Console
+from rich.table import Table
 
 app = typer.Typer(name="lumiseval", help="Agentic LLM evaluation pipeline.")
 console = Console()
@@ -33,13 +31,23 @@ console = Console()
 
 @app.command()
 def eval(
-    input: Optional[Path] = typer.Option(None, "--input", "-i", help="Path to generation text file."),
-    question: Optional[str] = typer.Option(None, "--question", "-q", help="Query that produced the generation."),
+    input: Optional[Path] = typer.Option(
+        None, "--input", "-i", help="Path to generation text file."
+    ),
+    question: Optional[str] = typer.Option(
+        None, "--question", "-q", help="Query that produced the generation."
+    ),
     web_search: bool = typer.Option(False, "--web-search", help="Enable Tavily web search."),
-    adversarial: bool = typer.Option(False, "--adversarial", help="Run adversarial / guardrail probes."),
+    adversarial: bool = typer.Option(
+        False, "--adversarial", help="Run adversarial / guardrail probes."
+    ),
     judge_model: str = typer.Option("gpt-4o-mini", "--model", "-m", help="LiteLLM judge model."),
-    budget_cap: Optional[float] = typer.Option(None, "--budget-cap", help="USD budget cap. Job rejected if estimate exceeds."),
-    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Write JSON report to this path."),
+    budget_cap: Optional[float] = typer.Option(
+        None, "--budget-cap", help="USD budget cap. Job rejected if estimate exceeds."
+    ),
+    output: Optional[Path] = typer.Option(
+        None, "--output", "-o", help="Write JSON report to this path."
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip cost confirmation prompt."),
 ) -> None:
     """Evaluate a single LLM generation."""
@@ -96,7 +104,9 @@ def eval(
 
 @app.command()
 def estimate(
-    input: Optional[Path] = typer.Option(None, "--input", "-i", help="Path to generation file or dataset."),
+    input: Optional[Path] = typer.Option(
+        None, "--input", "-i", help="Path to generation file or dataset."
+    ),
     web_search: bool = typer.Option(False, "--web-search"),
     judge_model: str = typer.Option("gpt-4o-mini", "--model", "-m"),
 ) -> None:
@@ -159,8 +169,12 @@ def _print_cost_table(cost) -> None:
     table.add_column("Calls", justify="right")
     table.add_column("Cost (USD)", justify="right")
     table.add_row("Judge calls", str(cost.estimated_judge_calls), f"${cost.judge_cost_usd:.6f}")
-    table.add_row("Embedding calls", str(cost.estimated_embedding_calls), f"${cost.embedding_cost_usd:.6f}")
-    table.add_row("Tavily searches", str(cost.estimated_tavily_calls), f"${cost.tavily_cost_usd:.6f}")
+    table.add_row(
+        "Embedding calls", str(cost.estimated_embedding_calls), f"${cost.embedding_cost_usd:.6f}"
+    )
+    table.add_row(
+        "Tavily searches", str(cost.estimated_tavily_calls), f"${cost.tavily_cost_usd:.6f}"
+    )
     table.add_row("[bold]Total[/bold]", "", f"[bold]${cost.total_estimated_usd:.6f}[/bold]")
     console.print(table)
     console.print(f"  Confidence range: ${cost.low_usd:.6f} – ${cost.high_usd:.6f} (±20%)")

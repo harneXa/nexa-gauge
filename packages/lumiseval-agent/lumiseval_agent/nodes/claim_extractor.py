@@ -9,17 +9,17 @@ aborting the full evaluation.
 TODO: Tune the extraction prompt for domain-specific claim types.
 """
 
-import logging
 from typing import Optional
 
 import instructor
 import litellm
-from pydantic import BaseModel, Field
-
 from lumiseval_core.config import config
 from lumiseval_core.types import Chunk, Claim
+from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+from lumiseval_agent.log import get_node_logger
+
+log = get_node_logger("claim_extractor")
 
 _EXTRACTION_PROMPT = """You are a precise claim extractor. Given the following text chunk, extract
 all atomic, verifiable factual claims it makes.
@@ -63,6 +63,7 @@ def extract_claims(
     all_claims: list[Claim] = []
 
     for chunk in chunks:
+        log.info(f"chunk {chunk.index + 1}/{len(chunks)}  ({len(chunk.text)} chars)")
         try:
             result = client.chat.completions.create(
                 model=model,
@@ -75,6 +76,8 @@ def extract_claims(
                     }
                 ],
             )
+            n = len(result.claims)
+            log.info(f"  → {n} claim(s) extracted from chunk {chunk.index}")
             for claim_text, confidence in zip(result.claims, result.confidences):
                 all_claims.append(
                     Claim(
@@ -84,11 +87,8 @@ def extract_claims(
                     )
                 )
         except Exception as exc:
-            logger.warning(
-                "Claim extraction failed for chunk %d after %d retries: %s",
-                chunk.index,
-                max_retries,
-                exc,
+            log.warning(
+                f"Extraction failed for chunk {chunk.index} after {max_retries} retries: {exc}"
             )
             all_claims.append(
                 Claim(
@@ -98,4 +98,6 @@ def extract_claims(
                 )
             )
 
-    return [c for c in all_claims if not c.extraction_failed or c.text]
+    valid = [c for c in all_claims if not c.extraction_failed or c.text]
+    log.success(f"{len(valid)} total claim(s) across all chunks")
+    return valid

@@ -16,11 +16,7 @@ import logging
 from typing import Any
 
 import lancedb
-import numpy as np
-from sentence_transformers import SentenceTransformer
-
 from lumiseval_core.config import config
-from lumiseval_core.errors import EvidenceRoutingError
 from lumiseval_core.types import (
     Claim,
     ClaimVerdict,
@@ -28,6 +24,7 @@ from lumiseval_core.types import (
     EvidenceResult,
     EvidenceSource,
 )
+from sentence_transformers import SentenceTransformer
 
 from .indexer import index_texts
 

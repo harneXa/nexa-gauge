@@ -7,13 +7,14 @@ is provided. Privacy and Bias metrics run only when adversarial=True.
 TODO: Batch metric execution to reduce redundant LLM calls.
 """
 
-import asyncio
-import logging
 from typing import Optional
 
 from lumiseval_core.types import DeepEvalMetricResult, EvidenceResult, RubricRule
+from deepeval.metrics import GEval
+from deepeval.test_case import LLMTestCase, LLMTestCaseParams
+from lumiseval_agent.log import get_node_logger
 
-logger = logging.getLogger(__name__)
+log = get_node_logger("deepeval")
 
 
 def run(
@@ -36,8 +37,10 @@ def run(
         DeepEvalMetricResult with available scores.
     """
     context = [p.text for er in evidence_results for p in er.passages]
+    log.info(f"Context passages available: {len(context)}")
     result = DeepEvalMetricResult()
 
+    log.info("Running HallucinationMetric")
     try:
         from deepeval.metrics import HallucinationMetric
         from deepeval.test_case import LLMTestCase
@@ -51,14 +54,14 @@ def run(
         hallucination = HallucinationMetric(model=judge_model)
         hallucination.measure(test_case)
         result.hallucination_score = hallucination.score
+        log.info(f"  hallucination_score={hallucination.score}")
     except Exception as exc:
-        logger.error("DeepEval HallucinationMetric failed: %s", exc)
+        log.error(f"HallucinationMetric failed: {exc}")
         result.error = str(exc)
 
     if rubric_rules:
+        log.info(f"Running GEval against {len(rubric_rules)} rubric rule(s)")
         try:
-            from deepeval.metrics import GEval
-            from deepeval.test_case import LLMTestCase, LLMTestCaseParams
 
             criteria = "\n".join(f"- {r.statement}" for r in rubric_rules)
             test_case = LLMTestCase(input="", actual_output=generation)
@@ -70,10 +73,12 @@ def run(
             )
             g_eval.measure(test_case)
             result.g_eval_score = g_eval.score
+            log.info(f"  g_eval_score={g_eval.score}")
         except Exception as exc:
-            logger.error("DeepEval GEval failed: %s", exc)
+            log.error(f"GEval failed: {exc}")
 
     if adversarial:
+        log.info("Running Privacy + Bias metrics  (adversarial=True)")
         try:
             from deepeval.metrics import BiasMetric, PrivacyMetric
             from deepeval.test_case import LLMTestCase
@@ -85,7 +90,8 @@ def run(
             bias.measure(test_case)
             result.privacy_score = privacy.score
             result.bias_score = bias.score
+            log.info(f"  privacy_score={privacy.score}  bias_score={bias.score}")
         except Exception as exc:
-            logger.error("DeepEval safety metrics failed: %s", exc)
+            log.error(f"Safety metrics failed: {exc}")
 
     return result

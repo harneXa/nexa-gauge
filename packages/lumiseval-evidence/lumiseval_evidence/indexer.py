@@ -12,9 +12,8 @@ from pathlib import Path
 from typing import Any
 
 import lancedb
-from sentence_transformers import SentenceTransformer
-
 from lumiseval_core.config import config
+from sentence_transformers import SentenceTransformer
 
 _model: SentenceTransformer | None = None
 

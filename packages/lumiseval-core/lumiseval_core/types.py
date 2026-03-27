@@ -1,11 +1,9 @@
 """Shared domain types for lumis-eval."""
 
-from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
-
 
 # ── Enums ──────────────────────────────────────────────────────────────────
 

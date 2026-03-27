@@ -8,12 +8,12 @@ TODO: Implement Rubric Extractor agent that auto-derives rules from reference do
 """
 
 import asyncio
-import logging
-from typing import Optional
 
 from lumiseval_core.types import RubricEvalResult, RubricRule, RubricRuleResult, RuleCompliance
 
-logger = logging.getLogger(__name__)
+from lumiseval_agent.log import get_node_logger
+
+log = get_node_logger("rubric_eval")
 
 
 async def _evaluate_rule(
@@ -37,9 +37,8 @@ async def _evaluate_rule(
         await asyncio.get_event_loop().run_in_executor(None, g_eval.measure, test_case)
 
         score = g_eval.score or 0.0
-        compliance = (
-            RuleCompliance.PASS if score >= 0.5 else RuleCompliance.FAIL
-        )
+        compliance = RuleCompliance.PASS if score >= 0.5 else RuleCompliance.FAIL
+        log.info(f"  [{compliance.value}] {rule.id}  score={score:.3f}")
         return RubricRuleResult(
             rule_id=rule.id,
             compliance=compliance,
@@ -47,7 +46,7 @@ async def _evaluate_rule(
             confidence=score,
         )
     except Exception as exc:
-        logger.error("Rubric rule %s evaluation failed: %s", rule.id, exc)
+        log.error(f"Rule '{rule.id}' evaluation failed: {exc}")
         return RubricRuleResult(
             rule_id=rule.id,
             compliance=RuleCompliance.UNCERTAIN,
