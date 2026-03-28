@@ -2,26 +2,37 @@ from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from lumiseval_core.constants import (
+    DEFAULT_EMBEDDING_MODEL,
+    DEFAULT_JUDGE_MODEL,
+    DEFAULT_LANCEDB_PATH,
+    DEFAULT_LLM_PROVIDER,
+    DEFAULT_MAX_CONCURRENT_JOBS,
+    EVIDENCE_VERDICT_SUPPORTED_THRESHOLD,
+)
+
 
 class Config(BaseSettings):
-    """Central config — all values sourced from environment variables."""
+    """Central config — all values sourced from environment variables.
+
+    Defaults come from constants.py so there is a single source of truth.
+    Set any of these via a .env file or shell environment to override.
+    """
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
-        env_ignore_empty=True,  # treat empty string env vars as unset (avoids float/int coercion errors)
+        env_ignore_empty=True,  # treat empty string env vars as unset
     )
-
-    print("Config initialized: ", model_config)
 
     # Runtime environment
     ENV: str = "development"
     LOG_LEVEL: str = "INFO"
 
     # LLM / Judge
-    LLM_PROVIDER: str = "openai"
-    LLM_MODEL: str = "gpt-4o-mini"
+    LLM_PROVIDER: str = DEFAULT_LLM_PROVIDER
+    LLM_MODEL: str = DEFAULT_JUDGE_MODEL
     OPENAI_API_KEY: Optional[str] = None
     ANTHROPIC_API_KEY: Optional[str] = None
 
@@ -30,24 +41,18 @@ class Config(BaseSettings):
     WEB_SEARCH_ENABLED: bool = False
 
     # Embeddings
-    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
+    EMBEDDING_MODEL: str = DEFAULT_EMBEDDING_MODEL
 
     # Vector storage
-    LANCEDB_PATH: str = "./.lancedb"
+    LANCEDB_PATH: str = DEFAULT_LANCEDB_PATH
     LANCEDB_MCP_URI: Optional[str] = None
 
     # Evidence routing
-    EVIDENCE_THRESHOLD: float = 0.75
+    EVIDENCE_THRESHOLD: float = EVIDENCE_VERDICT_SUPPORTED_THRESHOLD
 
     # Job execution
-    MAX_CONCURRENT_JOBS: int = 4
+    MAX_CONCURRENT_JOBS: int = DEFAULT_MAX_CONCURRENT_JOBS
     BUDGET_CAP_USD: Optional[float] = None
-
-    # Composite score weights (must sum to 1.0)
-    SCORE_WEIGHT_FAITHFULNESS: float = 0.4
-    SCORE_WEIGHT_HALLUCINATION: float = 0.3
-    SCORE_WEIGHT_RUBRIC: float = 0.2
-    SCORE_WEIGHT_SAFETY: float = 0.1
 
 
 config = Config()

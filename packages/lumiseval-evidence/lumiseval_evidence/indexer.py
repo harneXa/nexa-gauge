@@ -25,13 +25,6 @@ def _get_model() -> SentenceTransformer:
     return _model
 
 
-def _get_table(db_path: str, table_name: str = "documents") -> Any:
-    db = lancedb.connect(db_path)
-    if table_name in db.table_names():
-        return db.open_table(table_name)
-    return None
-
-
 def index_texts(
     texts: list[str],
     doc_ids: list[str],

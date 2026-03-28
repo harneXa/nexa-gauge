@@ -15,18 +15,17 @@ _console = Console(highlight=False)
 
 # One color per pipeline node — keep these visually distinct
 NODE_COLORS: dict[str, str] = {
-    "metadata_scanner": "cyan",
-    "cost_estimator": "yellow",
-    "confirm_gate": "white",
-    "chunker": "blue",
-    "claim_extractor": "magenta",
-    "mmr_deduplicator": "green",
-    "evidence_router": "dark_orange",
-    "ragas": "bright_green",
-    "deepeval": "cornflower_blue",
-    "giskard": "red",
-    "rubric_eval": "orchid",
-    "aggregation": "gold1",
+    "scan": "cyan",
+    "estimate": "yellow",
+    "approve": "white",
+    "chunk": "blue",
+    "claims": "magenta",
+    "dedupe": "green",
+    "relevance": "bright_green",
+    "grounding": "cornflower_blue",
+    "redteam": "red",
+    "rubric": "orchid",
+    "eval": "gold1",
 }
 
 

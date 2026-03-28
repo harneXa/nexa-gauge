@@ -1,329 +1,301 @@
-# Get Started with LumisEval
+# Get Started with LumisEval (Run-Only CLI)
 
-LumisEval is an LLM evaluation pipeline that scores AI-generated text for faithfulness, hallucination, and rubric adherence. It uses a LangGraph orchestration graph, local vector search (LanceDB), and pluggable judge models via LiteLLM.
-
----
-
-## Prerequisites
-
-- **Python 3.11+**
-- **[uv](https://docs.astral.sh/uv/getting-started/installation/)** — fast Python package manager
-- An **OpenAI API key** (minimum requirement for the judge model)
-
----
-
-## 1. Install uv
+LumisEval now exposes one primary CLI workflow:
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
+lumiseval run <node_name> --input <source> ...
 ```
 
-Verify:
+And one API endpoint:
 
-```bash
-uv --version
+```http
+POST /jobs
 ```
 
----
+`POST /jobs` accepts either a single record or an array of records.
 
-## 2. Clone and Install
+## 1) Prerequisites
 
-```bash
-git clone <repo-url>
-cd lumis-eval
+- Python `>=3.10`
+- `uv`
+- `OPENAI_API_KEY` for judge/model-powered nodes
+- Optional: `TAVILY_API_KEY` when using `--web-search`
 
-# Create a virtual environment and install all workspace packages
-make install
-```
-
-This runs `uv venv` + `uv pip install -e` for every package in the workspace. After this you will have two binaries on your PATH (inside `.venv`):
-
-| Binary | Purpose |
-|--------|---------|
-| `lumiseval` | CLI for running evaluations |
-| `lumiseval-api` | FastAPI server |
-
-Activate the environment:
+## 2) Setup
 
 ```bash
-source .venv/bin/activate
-```
-
----
-
-## 3. Configure Environment
-
-Copy the example env file and fill in your keys:
-
-```bash
+cd /Volumes/Raid1CrucialHD/sardhendu/workspace/lumis-eval
+uv sync
 cp .env.example .env
 ```
 
-Open `.env` and set at minimum:
+Set at least:
 
 ```bash
-# Required
 OPENAI_API_KEY=sk-...
-
-# Optional — enable web search evidence
-TAVILY_API_KEY=tvly-...
-WEB_SEARCH_ENABLED=false
-
-# Optional — override the judge model (default: gpt-4o-mini)
 LLM_MODEL=gpt-4o-mini
+WEB_SEARCH_ENABLED=false
 ```
 
-All other values have sensible defaults. Embeddings run locally via `sentence-transformers` (no API key needed).
-
----
-
-## 4. Sample Dataset
-
-The pipeline accepts four input formats: `.txt`, `.json`, `.jsonl`, and `.csv`. The minimum required field is `generation` — the LLM output you want evaluated. Optionally include `question` (the original prompt) and `context` (reference passages).
-
-### Single record — plain text
-
-Save as `sample.txt`:
-
-```
-The Eiffel Tower is located in Paris, France. It was built between 1887 and 1889
-as the entrance arch for the 1889 World's Fair. The tower stands 330 metres tall
-and is the most-visited paid monument in the world.
-```
-
-### Single record — JSON
-
-Save as `sample.json`:
-
-```json
-{
-  "question": "What is the Eiffel Tower and where is it located?",
-  "generation": "The Eiffel Tower is a wrought-iron lattice tower located in Paris, France. It was constructed between 1887 and 1889 and served as the entrance arch to the 1889 World's Fair. Standing at 330 metres, it is one of the most recognisable structures in the world.",
-  "context": "The Eiffel Tower (/ˈaɪfəl/ EYE-fəl; French: Tour Eiffel) is a wrought-iron lattice tower on the Champ de Mars in Paris, France. It is named after the engineer Gustave Eiffel, whose company designed and built the tower from 1887 to 1889 as the centerpiece of the 1889 World's Fair."
-}
-```
-
-### Batch — JSONL (one record per line)
-
-Save as `sample_batch.jsonl`:
-
-```jsonl
-{"question": "What is the Eiffel Tower?", "generation": "The Eiffel Tower is a wrought-iron lattice tower located in Paris, France, built in 1889.", "context": "The Eiffel Tower is a wrought-iron lattice tower on the Champ de Mars in Paris, France."}
-{"question": "Who invented the telephone?", "generation": "Alexander Graham Bell is widely credited with inventing the first practical telephone in 1876.", "context": "Alexander Graham Bell was awarded the first US patent for the telephone on March 7, 1876."}
-{"question": "What is the speed of light?", "generation": "The speed of light in a vacuum is approximately 300,000 kilometres per second.", "context": "The speed of light in vacuum, commonly denoted c, is a universal physical constant equal to 299,792,458 metres per second."}
-```
-
-### Batch — CSV
-
-Save as `sample_batch.csv`:
-
-```csv
-question,generation,context
-"What is the Eiffel Tower?","The Eiffel Tower is a wrought-iron lattice tower in Paris, France.","The Eiffel Tower is a wrought-iron lattice tower on the Champ de Mars in Paris."
-"Who invented the telephone?","Alexander Graham Bell invented the telephone in 1876.","Bell was awarded the first US patent for the telephone on March 7, 1876."
-```
-
----
-
-## 5. Running an Evaluation
-
-### Step 1 — Estimate cost first (no LLM calls)
-
-Before committing API spend, run a dry-run cost estimate:
+If Hugging Face adapter is missing:
 
 ```bash
-lumiseval estimate --input sample.json
+uv add datasets
 ```
 
-Output shows estimated judge calls, token usage, and USD cost band (±20%).
+## 3) CLI Contract
 
-### Step 2 — Run a single evaluation
+### 3.1 Command shape
 
 ```bash
-lumiseval eval --input sample.json
+uv run lumiseval run <node_name> --input <source> [options]
 ```
 
-This runs the full pipeline:
+Where:
+- `<source>` is either:
+  - local path (`.json`, `.jsonl`, `.csv`, `.txt`)
+  - `hf://<dataset-id>`
+- `<node_name>` is one of:
+  - `scan`
+  - `estimate`
+  - `approve`
+  - `chunk`
+  - `claims`
+  - `dedupe`
+  - `relevance`
+  - `grounding`
+  - `redteam`
+  - `rubric`
+  - `eval`
 
-1. Scans metadata (tokens, estimated chunks and claims)
-2. Shows cost estimate and prompts for confirmation
-3. Chunks the generation into 512-token semantic chunks
-4. Extracts atomic claims
-5. Deduplicates claims via MMR
-6. Routes each claim to evidence sources (local LanceDB → web if enabled)
-7. Runs RAGAS (faithfulness + answer relevancy) and DeepEval (hallucination)
-8. Aggregates a composite score
+### 3.2 Strict target semantics
 
-Save the report to a file:
+`run <node_name>` executes prerequisites and stops at that target node.
+Preflight cost estimation is target-aware, so it only estimates the branch required for that target.
+
+Examples:
+- `run estimate` stops at `estimate`
+- `run claims` stops at `claims`
+- `run eval` runs the full required path to final eval
+
+### 3.3 Two-stage execution model
+
+Every CLI run does:
+
+1. Dataset preflight (for selected cases):
+- scan records
+- print scan statistics table
+- estimate total cost
+- prompt for confirmation (unless `--yes`)
+
+2. Per-case node execution:
+- run each record up to target node
+- reuse cache by default
+- print executed/cached counts per case
+
+## 4) Examples
+
+### 4.1 Run to `estimate` on local file
 
 ```bash
-lumiseval eval --input sample.json --output report.json
+uv run lumiseval run estimate \
+  --input sample.json \
+  --limit 10 \
+  --yes
 ```
 
-Skip the cost confirmation prompt (useful for scripts):
+### 4.2 Run to `eval` on local file
 
 ```bash
-lumiseval eval --input sample.json --yes
+uv run lumiseval run eval \
+  --input sample.json \
+  --limit 10 \
+  --yes \
+  --output-dir ./runs/eval
 ```
 
-### Step 3 — Run a batch evaluation
+### 4.3 Run to a node on Hugging Face dataset
 
 ```bash
-lumiseval batch sample_batch.jsonl --yes --output-dir ./results
+uv run lumiseval run relevance \
+  --input hf://openai/gsm8k \
+  --adapter huggingface \
+  --hf-config main \
+  --split train \
+  --limit 10 \
+  --yes
 ```
 
-Each record produces a separate report JSON in `./results/`.
+## 5) Input Fields
 
----
+### 5.1 Canonical record (`EvalCase`)
 
-## 6. Optional Flags
+Required:
+- `generation`
 
-| Flag | Description |
-|------|-------------|
-| `--model gpt-4o` | Override the judge model (any LiteLLM-supported model) |
-| `--web-search` | Enable Tavily web search as an evidence source |
-| `--adversarial` | Enable Giskard adversarial probes (prompt injection, PII, bias) |
-| `--rubric rules.json` | Evaluate against a custom rubric (see below) |
-| `--budget 0.10` | Abort if estimated cost exceeds $0.10 |
-| `--yes` | Skip cost confirmation prompt |
-| `--output report.json` | Write JSON report to file |
+Optional:
+- `case_id`
+- `question`
+- `ground_truth`
+- `context`
+- `reference_files`
+- `rubric_rules`
+- additional metadata fields
 
----
+### 5.2 Local adapter aliases
 
-## 7. Using a Custom Rubric
+- Generation: `generation | response | answer | output | completion`
+- Case id: `case_id | id | uuid | prompt_id`
+- Question: `question | query | prompt`
+- Ground truth: `ground_truth | reference | gold_answer`
+- Context: `context | contexts | documents`
+- Reference files: `reference_files | reference_paths`
+- Rubric rules: `rubric_rules | rubric`
 
-Create a `rubric.json` file with rules to evaluate against:
+### 5.3 Hugging Face adapter aliases
 
-```json
-[
-  "The response must cite specific dates or years when making historical claims.",
-  "The response must not use hedging language such as 'might' or 'possibly' for established facts.",
-  "The response must be written in formal English without contractions."
-]
-```
+- Generation: `generation | response | answer | output | completion`
+- Case id: `case_id | id | prompt_id`
+- Question: `question | query | prompt`
+- Ground truth: `ground_truth | reference`
+- Context: `context | contexts | documents`
+- Reference files: `reference_files | reference_paths`
+- Rubric rules: `rubric_rules | rubric`
 
-Run with rubric:
+## 6) Cache Behavior
+
+Cache is enabled by default.
+
+Controls:
+- `--no-cache`: disable cache reads/writes
+- `--force`: ignore cache reads but still write outputs
+- `--cache-dir`: custom cache location
+
+Case hash includes:
+- `generation`
+- `question`
+- `ground_truth`
+- `rubric_rules` (`id`, `statement`, `pass_condition`)
+- `reference_files`
+
+Config hash includes:
+- `judge_model`
+- `enable_hallucination`
+- `enable_faithfulness`
+- `enable_answer_relevancy`
+- `enable_adversarial`
+- `enable_rubric`
+- `web_search`
+- `evidence_threshold`
+
+This enables incremental behavior:
+- unchanged cases hit cache
+- new/changed cases execute
+
+## 7) Important CLI Options
+
+- Source / selection:
+  - `--input`
+  - `--split`
+  - `--limit`
+  - `--adapter`
+  - `--hf-config`
+  - `--hf-revision`
+- Model / retrieval:
+  - `--model`
+  - `--web-search`
+  - `--evidence-threshold`
+- Metric toggles:
+  - `--enable-hallucination/--disable-hallucination`
+  - `--enable-faithfulness/--disable-faithfulness`
+  - `--enable-answer-relevancy/--disable-answer-relevancy`
+  - `--enable-adversarial/--disable-adversarial`
+  - `--enable-rubric/--disable-rubric`
+- Control:
+  - `--yes`
+  - `--continue-on-error/--fail-fast`
+  - `--force`
+  - `--no-cache`
+  - `--cache-dir`
+  - `--output-dir` (eval output JSONs)
+
+## 8) API Usage
+
+### 8.1 Start API
 
 ```bash
-lumiseval eval --input sample.json --rubric rubric.json
+uv run uvicorn lumiseval_api.main:app --reload --port 8080
 ```
 
-Each rule is evaluated independently via G-Eval and rolled into the composite score (default weight: 20%).
-
----
-
-## 8. Running the REST API
-
-Start the API server:
+### 8.2 Single-record request
 
 ```bash
-make api
-# or
-lumiseval-api
-```
-
-The server starts at `http://localhost:8080`. Submit a job:
-
-```bash
-curl -X POST http://localhost:8080/jobs \
+curl -X POST "http://localhost:8080/jobs" \
   -H "Content-Type: application/json" \
   -d '{
-    "question": "What is the Eiffel Tower?",
-    "generation": "The Eiffel Tower is a wrought-iron lattice tower located in Paris, France, built in 1889.",
+    "generation": "The Eiffel Tower is in Paris, France.",
+    "question": "Where is the Eiffel Tower?",
+    "ground_truth": "The Eiffel Tower is a wrought-iron lattice tower in Paris.",
     "judge_model": "gpt-4o-mini",
-    "enable_ragas": true,
-    "enable_deepeval": true,
     "web_search": false,
-    "acknowledge_cost": true
+    "enable_hallucination": true,
+    "enable_faithfulness": true,
+    "enable_answer_relevancy": true
   }'
 ```
 
-Check the API is running:
+### 8.3 Multi-record request (JSON array)
 
 ```bash
-curl http://localhost:8080/health
-```
-
----
-
-## 9. Understanding the Report
-
-The output JSON report has this shape:
-
-```json
-{
-  "job_id": "...",
-  "composite_score": 0.84,
-  "confidence_band": 0.06,
-  "evaluation_incomplete": false,
-  "warnings": [],
-  "cost_actual_usd": 0.0031,
-  "ragas": {
-    "faithfulness": 0.91,
-    "answer_relevancy": 0.88
-  },
-  "deepeval": {
-    "hallucination_score": 0.12,
-    "geval_score": null
-  },
-  "claim_verdicts": [
+curl -X POST "http://localhost:8080/jobs" \
+  -H "Content-Type: application/json" \
+  -d '[
     {
-      "claim_text": "The Eiffel Tower is located in Paris, France.",
-      "verdict": "SUPPORTED",
-      "source": "LOCAL",
-      "passages": [...]
+      "generation": "The Eiffel Tower is in Paris, France.",
+      "question": "Where is the Eiffel Tower?",
+      "ground_truth": "The Eiffel Tower is a wrought-iron lattice tower in Paris.",
+      "judge_model": "gpt-4o-mini",
+      "web_search": false
+    },
+    {
+      "generation": "Photosynthesis converts light into chemical energy.",
+      "question": "How does photosynthesis work?",
+      "judge_model": "gpt-4o-mini",
+      "web_search": false
     }
-  ]
-}
+  ]'
 ```
 
-**Composite score** is a weighted average (configurable in `.env`):
+### 8.4 API request fields
 
-| Metric | Default weight |
-|--------|---------------|
-| Faithfulness | 40% |
-| Hallucination (inverted) | 30% |
-| Rubric adherence | 20% |
-| Safety | 10% |
+Required:
+- `generation: str`
 
----
+Optional:
+- `question: str | null`
+- `ground_truth: str | null`
+- `rubric_rules: RubricRule[]`
+- `reference_files: list[str]`
+- `judge_model: str`
+- `web_search: bool`
+- `enable_hallucination: bool`
+- `enable_faithfulness: bool`
+- `enable_answer_relevancy: bool`
+- `enable_adversarial: bool`
+- `enable_rubric: bool`
+- `evidence_threshold: float`
+- `budget_cap_usd: float | null`
+- `acknowledge_cost: bool` (accepted; not enforced)
 
-## 10. Configuration Reference
+## 9) Troubleshooting
 
-Key `.env` settings:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LLM_MODEL` | `gpt-4o-mini` | Judge model (any LiteLLM provider) |
-| `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Local embedding model |
-| `LANCEDB_PATH` | `./.lancedb` | Local vector store directory |
-| `EVIDENCE_THRESHOLD` | `0.75` | Minimum similarity score for evidence retrieval |
-| `WEB_SEARCH_ENABLED` | `false` | Enable Tavily web search |
-| `BUDGET_CAP_USD` | _(none)_ | Reject jobs exceeding this cost |
-| `SCORE_WEIGHT_FAITHFULNESS` | `0.4` | Composite score weight |
-| `SCORE_WEIGHT_HALLUCINATION` | `0.3` | Composite score weight |
-| `SCORE_WEIGHT_RUBRIC` | `0.2` | Composite score weight |
-| `SCORE_WEIGHT_SAFETY` | `0.1` | Composite score weight |
-
----
-
-## 11. Development Commands
-
-```bash
-make lint        # Run ruff linter
-make format      # Auto-format with ruff
-make typecheck   # mypy type checking
-make test        # Run pytest
-```
-
----
-
-## Troubleshooting
-
-**`lumiseval: command not found`** — Make sure the venv is activated: `source .venv/bin/activate`
-
-**`OPENAI_API_KEY not set`** — Ensure `.env` exists in the repo root with a valid key.
-
-**`BudgetExceededError`** — Your estimated cost exceeds `BUDGET_CAP_USD`. Either raise the cap or reduce your input size.
-
-**`InputParseError`** — Check that your input file has the required `generation` field and is valid JSON/JSONL/CSV.
+- `Invalid dataset source ...`
+  - check path, adapter, or `hf://` format
+- `Unknown node ...`
+  - use one of supported node names (including `eval`)
+- Hugging Face import error
+  - run `uv add datasets`
+- API key errors
+  - set `OPENAI_API_KEY`
+- No Tavily fallback
+  - set `TAVILY_API_KEY` or disable `--web-search`

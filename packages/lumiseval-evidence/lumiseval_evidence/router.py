@@ -17,6 +17,12 @@ from typing import Any
 
 import lancedb
 from lumiseval_core.config import config
+from lumiseval_core.constants import (
+    EVIDENCE_RETRIEVAL_TOP_K,
+    EVIDENCE_TAVILY_MAX_RESULTS,
+    EVIDENCE_VERDICT_SUPPORTED_THRESHOLD,
+    EVIDENCE_VERDICT_UNVERIFIABLE_THRESHOLD,
+)
 from lumiseval_core.types import (
     Claim,
     ClaimVerdict,
@@ -44,7 +50,7 @@ def _query_lancedb(
     query_text: str,
     db_path: str,
     table_name: str = "documents",
-    top_k: int = 5,
+    top_k: int = EVIDENCE_RETRIEVAL_TOP_K,
 ) -> list[dict[str, Any]]:
     # try:
     db = lancedb.connect(db_path)
@@ -66,7 +72,7 @@ def _tavily_search(query: str) -> list[dict[str, Any]]:
     from tavily import TavilyClient
 
     client = TavilyClient(api_key=config.TAVILY_API_KEY)
-    response = client.search(query, max_results=5)
+    response = client.search(query, max_results=EVIDENCE_TAVILY_MAX_RESULTS)
     return response.get("results", [])
     # except Exception as exc:
     #     logger.error("Tavily search failed for query '%s': %s", query, exc)
@@ -165,8 +171,8 @@ def route(
 
 
 def _score_to_verdict(score: float) -> ClaimVerdict:
-    if score >= 0.75:
+    if score >= EVIDENCE_VERDICT_SUPPORTED_THRESHOLD:
         return ClaimVerdict.SUPPORTED
-    if score >= 0.4:
+    if score >= EVIDENCE_VERDICT_UNVERIFIABLE_THRESHOLD:
         return ClaimVerdict.UNVERIFIABLE
     return ClaimVerdict.CONTRADICTED
