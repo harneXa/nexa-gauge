@@ -66,7 +66,7 @@ def _estimate_call_counts(
     eligible_chunks = metadata.eligible_chunk_count or {}
     eligible_claims = metadata.eligible_claim_count or {}
 
-    needs_claim_path = target_node in {"estimate", "claims", "dedupe", "relevance", "grounding", "eval"} # "retrieve", 
+    needs_claim_path = target_node in {"estimate", "claims", "dedupe", "relevance", "grounding", "eval"} # "retrieve",
     # needs_retrieval_path = target_node in {"retrieve", "relevance", "grounding", "eval"}
     needs_relevance = target_node in {"relevance", "eval"}
     needs_grounding = target_node in {"grounding", "eval"} and job_config.enable_hallucination
@@ -94,10 +94,12 @@ def _estimate_call_counts(
     )
     estimated_embedding_calls = claim_path_chunks if needs_claim_path else 0
 
-    # Required later for Tavily calls
-    estimated_tavily_calls = 0
-    # if job_config.web_search and needs_retrieval_path:
-    #     estimated_tavily_calls = int(retrieval_path_claims * _WEB_SEARCH_CLAIM_FRACTION)
+    retrieval_path_claims = eligible_claims.get("retrieve", claims)
+    estimated_tavily_calls = (
+        int(retrieval_path_claims * _WEB_SEARCH_CLAIM_FRACTION)
+        if job_config.web_search and needs_claim_path
+        else 0
+    )
 
     return estimated_judge_calls, estimated_embedding_calls, estimated_tavily_calls
 

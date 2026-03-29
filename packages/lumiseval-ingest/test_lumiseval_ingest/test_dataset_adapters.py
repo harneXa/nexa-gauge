@@ -8,6 +8,7 @@ from lumiseval_ingest.adapters import (
     create_dataset_adapter,
 )
 
+
 def test_local_file_adapter_maps_jsonl_to_eval_cases(tmp_path) -> None:
     dataset_file = tmp_path / "cases.jsonl"
     rows = [

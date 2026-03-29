@@ -13,7 +13,11 @@ import hashlib
 
 import semchunk
 import tiktoken
-from lumiseval_core.constants import CHUNK_MIN_TOKENS_FOR_SPLIT, CHUNK_SIZE_TOKENS, TIKTOKEN_ENCODING
+from lumiseval_core.constants import (
+    CHUNK_MIN_TOKENS_FOR_SPLIT,
+    CHUNK_SIZE_TOKENS,
+    TIKTOKEN_ENCODING,
+)
 from lumiseval_core.types import Chunk
 
 _ENCODING = tiktoken.get_encoding(TIKTOKEN_ENCODING)

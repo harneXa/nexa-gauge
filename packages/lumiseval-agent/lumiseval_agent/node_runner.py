@@ -20,7 +20,6 @@ from typing import Any
 
 from lumiseval_core.cache import CacheStore, compute_case_hash, compute_config_hash
 from lumiseval_core.types import EvalCase, EvalJobConfig
-from lumiseval_evidence.indexer import index_file
 from pydantic import BaseModel
 
 from lumiseval_agent import graph as graph_module
@@ -282,7 +281,6 @@ class CachedNodeRunner:
         executed: list[str] = []
         cached: list[str] = []
         node_output: dict[str, Any] = {}
-        reference_indexed = False
         metric_group = ["relevance", "grounding", "redteam", "rubric"]
 
         # A plan may look like below

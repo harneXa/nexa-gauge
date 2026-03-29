@@ -5,14 +5,9 @@ Uses a single batched LLM call to verify all claims at once.
 Returns a MetricResult with score = fraction of claims supported by context (1.0 = all supported).
 """
 
-from pydantic import BaseModel
 from lumiseval_core.constants import DEFAULT_JUDGE_MODEL
-from lumiseval_core.types import (
-    Claim, 
-    Faithfulness, 
-    MetricCategory, 
-    MetricResult
-)
+from lumiseval_core.types import Claim, Faithfulness, MetricCategory, MetricResult
+from pydantic import BaseModel
 
 from lumiseval_agent.llm.gateway import get_llm
 from lumiseval_agent.log import get_node_logger
@@ -26,8 +21,8 @@ class _FaithfulnessResult(BaseModel):
 
 
 def _faithfulness(
-    claims: list[Claim], 
-    context: list[str], 
+    claims: list[Claim],
+    context: list[str],
     judge_model: str
 ) -> MetricResult:
     """Check each claim against context passages; return fraction supported."""
@@ -57,8 +52,8 @@ def _faithfulness(
     if result is None or not result.verdicts:
         log.warning("Faithfulness LLM call returned no verdicts")
         return MetricResult(
-            name="faithfulness", 
-            category=MetricCategory.ANSWER, 
+            name="faithfulness",
+            category=MetricCategory.ANSWER,
             error="No verdicts returned"
         )
 

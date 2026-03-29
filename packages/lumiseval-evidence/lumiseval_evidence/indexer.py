@@ -9,7 +9,6 @@ TODO: Implement MCP LanceDB connection support.
 """
 
 from pathlib import Path
-from typing import Any
 
 import lancedb
 from lumiseval_core.config import config

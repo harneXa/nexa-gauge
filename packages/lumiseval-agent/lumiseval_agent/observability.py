@@ -39,7 +39,8 @@ observe: Any = None  # will be replaced below
 
 try:
     if os.getenv("LANGFUSE_SECRET_KEY"):
-        from langfuse import get_client, observe as _lf_observe  # noqa: E402
+        from langfuse import get_client  # noqa: E402
+        from langfuse import observe as _lf_observe
 
         _langfuse_client = get_client()
         observe = _lf_observe

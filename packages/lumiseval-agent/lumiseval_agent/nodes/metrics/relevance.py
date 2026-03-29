@@ -18,18 +18,16 @@ Using claims (not chunks) as statements because:
 from typing import Literal, Optional
 
 from lumiseval_core.constants import DEFAULT_JUDGE_MODEL
+from lumiseval_core.types import (
+    Claim,
+    MetricCategory,
+    MetricResult,
+    Relevancy,
+)
 from pydantic import BaseModel
 
 from lumiseval_agent.llm.gateway import get_llm
 from lumiseval_agent.log import get_node_logger
-
-from lumiseval_core.types import (
-    Claim, 
-    Relevancy, 
-    MetricResult,
-    MetricCategory,
-)
-
 
 log = get_node_logger("relevance")
 

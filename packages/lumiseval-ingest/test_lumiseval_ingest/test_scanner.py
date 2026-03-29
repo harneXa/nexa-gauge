@@ -41,7 +41,6 @@ def test_scan_cases_reports_node_eligibility_counts() -> None:
     assert meta.eligible_record_count["chunk"] == 1
     assert meta.eligible_record_count["claims"] == 1
     assert meta.eligible_record_count["dedupe"] == 1
-    assert meta.eligible_record_count["retrieve"] == 1
     assert meta.eligible_record_count["relevance"] == 1
     assert meta.eligible_record_count["grounding"] == 1
 
@@ -49,4 +48,4 @@ def test_scan_cases_reports_node_eligibility_counts() -> None:
 
     context_case = next(r for r in meta.per_record if r["case_id"] == "with-context-and-rubric")
     assert meta.eligible_chunk_count["claims"] == context_case["estimated_chunks"]
-    assert meta.eligible_claim_count["retrieve"] == context_case["estimated_claims"]
+    assert meta.eligible_claim_count["dedupe"] == context_case["estimated_claims"]
