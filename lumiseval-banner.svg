@@ -66,22 +66,23 @@
   </g>
 
   <g>
-    <path d="M1135 210L1245 280L1358 210L1245 350L1358 420" stroke="url(#line)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M1135 210L1260 280L1390 210" stroke="url(#line)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M1260 280L1210 390L1390 400" stroke="url(#line)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
 
     <circle cx="1135" cy="210" r="46" fill="#64B4FF" stroke="#EAF5FF" stroke-width="3"/>
     <text x="1109" y="216" class="nodeText">Input</text>
 
-    <circle cx="1245" cy="280" r="46" fill="#7AE2FF" stroke="#EAF5FF" stroke-width="3"/>
-    <text x="1217" y="286" class="nodeText">Claims</text>
+    <circle cx="1260" cy="280" r="46" fill="#7AE2FF" stroke="#EAF5FF" stroke-width="3"/>
+    <text x="1232" y="286" class="nodeText">Claims</text>
 
-    <circle cx="1358" cy="210" r="46" fill="#74F2CC" stroke="#EAF5FF" stroke-width="3"/>
-    <text x="1332" y="216" class="nodeText">Judge</text>
+    <circle cx="1390" cy="210" r="46" fill="#74F2CC" stroke="#EAF5FF" stroke-width="3"/>
+    <text x="1364" y="216" class="nodeText">Judge</text>
 
-    <circle cx="1245" cy="350" r="46" fill="#FFD284" stroke="#EAF5FF" stroke-width="3"/>
-    <text x="1212" y="356" class="nodeText">Metrics</text>
+    <circle cx="1210" cy="390" r="46" fill="#FFD284" stroke="#EAF5FF" stroke-width="3"/>
+    <text x="1177" y="396" class="nodeText">Metrics</text>
 
-    <circle cx="1358" cy="420" r="46" fill="#FFA886" stroke="#EAF5FF" stroke-width="3"/>
-    <text x="1334" y="426" class="nodeText">Report</text>
+    <circle cx="1390" cy="400" r="46" fill="#FFA886" stroke="#EAF5FF" stroke-width="3"/>
+    <text x="1366" y="406" class="nodeText">Report</text>
   </g>
 
   <g>
