@@ -1,7 +1,7 @@
 """Shared domain types for lumis-eval."""
 
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -107,6 +107,18 @@ class CostEstimate(BaseModel):
 # ── Unified metric result types ─────────────────────────────────────────────
 
 
+class Faithfulness(Claim):
+    """Per-claim verdict produced by the faithfulness evaluator.
+
+    Inherits all Claim fields (text, source_chunk_index, confidence,
+    extraction_failed) and adds the faithfulness verdict.
+    """
+    verdict: str  # "ACCEPTED" or "REJECTED"
+
+class Relevancy(Claim):
+    verdict: str
+
+
 class MetricResult(BaseModel):
     """Result for a single evaluation metric. score is always 0.0–1.0 where 1.0 is best."""
 
@@ -116,6 +128,7 @@ class MetricResult(BaseModel):
     passed: Optional[bool] = None
     reasoning: Optional[str] = None
     error: Optional[str] = None
+    result: list[Union[Faithfulness, Relevancy]] = Field(default_factory=list)
 
 
 class QualityScore(BaseModel):

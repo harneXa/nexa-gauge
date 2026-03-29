@@ -136,9 +136,9 @@ class NodeRunner:
         "chunk": {"chunks": []},
         "claims": {"raw_claims": []},
         "dedupe": {"unique_claims": []},
-        "relevance": {"ragas_metrics": []},
-        "grounding": {"hallucination_metrics": []},
-        "redteam": {"adversarial_metrics": []},
+        "relevance": {"relevance_metrics": []},
+        "grounding": {"grounding_metrics": []},
+        "redteam": {"redteam_metrics": []},
         "rubric": {"rubric_metrics": []},
     }
 

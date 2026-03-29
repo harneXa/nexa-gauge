@@ -31,7 +31,6 @@ from lumiseval_core.types import (
 )
 from lumiseval_evidence.indexer import index_file
 from lumiseval_evidence.mmr import deduplicate
-# from lumiseval_evidence.router import route
 from lumiseval_ingest.chunker import chunk_text
 from lumiseval_ingest.scanner import scan_text
 
@@ -77,9 +76,9 @@ class EvalState(TypedDict):
     raw_claims: list[Claim]
     unique_claims: list[Claim]
     # Metric results — one list per parallel node
-    hallucination_metrics: list[MetricResult]
-    ragas_metrics: list[MetricResult]
-    adversarial_metrics: list[MetricResult]
+    grounding_metrics: list[MetricResult]
+    relevance_metrics: list[MetricResult]
+    redteam_metrics: list[MetricResult]
     rubric_metrics: list[MetricResult]
     cost_actual_usd: float
     report: Optional[EvalReport]
@@ -103,7 +102,6 @@ def node_metadata_scanner(state: EvalState) -> dict:
 
 @observe(name="node_estimate")
 def node_cost_estimator(state: EvalState) -> dict:
-    # try:
     estimate = cost_estimator.estimate(
         state["metadata"],
         state["job_config"],
@@ -114,9 +112,6 @@ def node_cost_estimator(state: EvalState) -> dict:
         _log_cost.warning(estimate.approximate_warning)
 
     return {"cost_estimate": estimate}
-    # except Exception as exc:
-    #     _log_cost.error(str(exc))
-    #     return {"error": str(exc)}
 
 
 @observe(name="node_approve")
@@ -159,56 +154,48 @@ def node_dedupe(state: EvalState) -> dict:
 
 @observe(name="node_relevance")
 def node_relevance(state: EvalState) -> dict:
-    if not state.get("context"):
-        return {"ragas_metrics": []}
-    enable_f = state["job_config"].enable_faithfulness
-    enable_ar = state["job_config"].enable_answer_relevancy
-    if not enable_f and not enable_ar:
-        # _log_ragas.info("Skipped  (enable_faithfulness=False, enable_answer_relevancy=False)")
-        return {"ragas_metrics": []}
-    default = state["job_config"].judge_model
-    model = get_judge_model("relevance", default)
-
-
+    claims = state.get("unique_claims") or []
+    if not claims:
+        return {"relevance_metrics": []}
+    if not state["job_config"].enable_answer_relevancy:
+        return {"relevance_metrics": []}
+    model = get_judge_model("relevance", state["job_config"].judge_model)
     results = relevance.run(
-        context=state["context"],
-        claims=state["unique_claims"],
-        generation=state["generation"],
-        question=state["question"],
-        ground_truth=state["ground_truth"],
-        judge_model=model,  # RAGAS uses one model for the evaluate() call
-        enable_faithfulness=enable_f,
-        enable_answer_relevancy=enable_ar,
+        claims=claims,
+        question=state.get("question"),
+        judge_model=model,
+        enable_answer_relevancy=True,
     )
-
-    return {"ragas_metrics": results}
+    return {"relevance_metrics": results}
 
 
 @observe(name="node_grounding")
 def node_grounding(state: EvalState) -> dict:
-    if not state.get("context"):
-        return {"hallucination_metrics": []}
-    if not state["job_config"].enable_hallucination:
-        return {"hallucination_metrics": []}
+    claims = state.get("unique_claims") or []
+    if not claims or not state.get("context"):
+        return {"grounding_metrics": []}
+    if not state["job_config"].enable_faithfulness:
+        return {"grounding_metrics": []}
     model = get_judge_model("grounding", state["job_config"].judge_model)
-    result = grounding.run(
-        generation=state["generation"],
+    results = grounding.run(
+        claims=claims,
         context=state["context"],
         judge_model=model,
+        enable_faithfulness=True,
     )
-    return {"hallucination_metrics": [result]}
+    return {"grounding_metrics": results}
 
 
 @observe(name="node_redteam")
 def node_adversarial(state: EvalState) -> dict:
     if not state["job_config"].enable_adversarial:
-        return {"adversarial_metrics": []}
+        return {"redteam_metrics": []}
     model = get_judge_model("redteam", state["job_config"].judge_model)
     results = redteam.run(
         generation=state["generation"],
         judge_model=model,
     )
-    return {"adversarial_metrics": results}
+    return {"redteam_metrics": results}
 
 
 @observe(name="node_rubric")
@@ -229,9 +216,9 @@ def node_rubric(state: EvalState) -> dict:
 def node_eval(state: EvalState) -> dict:
     report = eval.aggregate(
         job_id=state["job_config"].job_id,
-        hallucination_metrics=state.get("hallucination_metrics") or [],
-        ragas_metrics=state.get("ragas_metrics") or [],
-        adversarial_metrics=state.get("adversarial_metrics") or [],
+        grounding_metrics=state.get("grounding_metrics") or [],
+        relevance_metrics=state.get("relevance_metrics") or [],
+        redteam_metrics=state.get("redteam_metrics") or [],
         rubric_metrics=state.get("rubric_metrics") or [],
         cost_estimate=state.get("cost_estimate"),
         cost_actual_usd=state.get("cost_actual_usd", 0.0),
@@ -311,9 +298,9 @@ def build_initial_state(
         chunks=[],
         raw_claims=[],
         unique_claims=[],
-        hallucination_metrics=[],
-        ragas_metrics=[],
-        adversarial_metrics=[],
+        grounding_metrics=[],
+        relevance_metrics=[],
+        redteam_metrics=[],
         rubric_metrics=[],
         cost_actual_usd=0.0,
         report=None,

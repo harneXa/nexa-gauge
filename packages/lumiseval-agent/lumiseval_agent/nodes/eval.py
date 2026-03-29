@@ -12,7 +12,6 @@ composite_score = simple average of the two dimension scores.
 Confidence band is the standard deviation of per-claim retrieval scores.
 """
 
-import statistics
 from typing import Optional
 
 from lumiseval_core.types import (
@@ -37,9 +36,9 @@ def _avg(metrics: list[MetricResult]) -> Optional[float]:
 
 def aggregate(
     job_id: str,
-    hallucination_metrics: list[MetricResult],
-    ragas_metrics: list[MetricResult],
-    adversarial_metrics: list[MetricResult],
+    grounding_metrics: list[MetricResult],
+    relevance_metrics: list[MetricResult],
+    redteam_metrics: list[MetricResult],
     rubric_metrics: list[MetricResult],
     cost_estimate: Optional[CostEstimate],
     cost_actual_usd: float,
@@ -50,7 +49,7 @@ def aggregate(
 
     # Synthesise evidence_support_rate from claim verdicts and add to the pool
     all_metrics: list[MetricResult] = list(
-        hallucination_metrics + ragas_metrics + adversarial_metrics + rubric_metrics
+        grounding_metrics + relevance_metrics + redteam_metrics + rubric_metrics
     )
 
     # Partition — vulnerability markers (score=0 presence flags) go to warnings, not scores
@@ -97,16 +96,12 @@ def aggregate(
             f"composite={composite_score}"
         )
 
-    # Confidence band — std dev of per-claim retrieval scores
-    retrieval_scores = [p.retrieval_score for v in claim_verdicts for p in v.passages]
     confidence_band: Optional[float] = None
-    if len(retrieval_scores) >= 2:
-        confidence_band = round(statistics.stdev(retrieval_scores), 4)
 
     if cost_estimate and cost_estimate.approximate_warning:
         warnings.append(cost_estimate.approximate_warning)
 
-    evaluation_incomplete = not retrieval_metrics and not answer_metrics and not claim_verdicts
+    evaluation_incomplete = not retrieval_metrics and not answer_metrics
 
     return EvalReport(
         job_id=job_id,
@@ -114,7 +109,6 @@ def aggregate(
         confidence_band=confidence_band,
         retrieval_score=retrieval_qs,
         answer_score=answer_qs,
-        claim_verdicts=claim_verdicts,
         cost_estimate=cost_estimate,
         cost_actual_usd=round(cost_actual_usd, 6),
         evaluation_incomplete=evaluation_incomplete,

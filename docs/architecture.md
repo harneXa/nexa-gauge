@@ -163,9 +163,9 @@ sequenceDiagram
 ## Scoring Model (Current)
 
 - Inputs to eval:
-  - `ragas_metrics`
-  - `hallucination_metrics`
-  - `adversarial_metrics`
+  - `relevance_metrics`
+  - `grounding_metrics`
+  - `redteam_metrics`
   - `rubric_metrics`
   - `claim_verdicts` from evidence routing
 - Derived metric:

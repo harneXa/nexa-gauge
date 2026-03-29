@@ -1,3 +1,9 @@
+<p align="center">
+  <img src="lumiseval-banner.svg" alt="Lumis Eval" width="720" />
+</p>
+
+
+
 # LumisEval
 
 > Agentic LLM evaluation pipeline — orchestrate RAGAS, DeepEval, and Giskard from a single command, with upfront cost estimates and per-claim source citations.

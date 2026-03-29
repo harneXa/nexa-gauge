@@ -1,113 +1,187 @@
 """
-RAGAS Node — computes faithfulness, answer relevancy, and optionally context
-precision/recall using a single ragas.evaluate() call.
+Claim-level answer relevancy metric.
 
-faithfulness and answer_relevancy measure answer quality (ANSWER category).
-context_precision and context_recall measure retrieval quality (RETRIEVAL category).
+Mirrors the DeepEval AnswerRelevancy pattern:
+  1. Statements are extracted from the response — we skip this step and use the
+     pre-extracted claims from claim_extractor → mmr_deduplicator instead.
+  2. Each claim is classified as "relevant", "irrelevant", or "idk" relative to
+     the original question.
+  3. score = count("relevant") / total_claims
 
-A single evaluate() call is used for all metrics to avoid redundant LLM calls.
-
-TODO: Wire LiteLLM as the judge LLM inside RAGAS so billing is unified.
+Using claims (not chunks) as statements because:
+  - Claims are atomic, deduplicated factual propositions — exactly what DeepEval
+    would extract internally with its own LLM call.
+  - Chunks are raw text segments (~512 tokens) that may span multiple statements
+    and include surrounding context that dilutes the relevancy signal.
 """
 
-from typing import Optional, List
+from typing import Literal, Optional
 
-from datasets import Dataset
-from lumiseval_core.types import MetricCategory, MetricResult
-from ragas import evaluate
-from ragas.metrics import AnswerRelevancy, Faithfulness
+from lumiseval_core.constants import DEFAULT_JUDGE_MODEL
+from pydantic import BaseModel
 
+from lumiseval_agent.llm.gateway import get_llm
 from lumiseval_agent.log import get_node_logger
+
+from lumiseval_core.types import (
+    Claim, 
+    Relevancy, 
+    MetricResult,
+    MetricCategory,
+)
+
 
 log = get_node_logger("relevance")
 
+_Verdict = Literal["relevant", "irrelevant", "idk"]
+
+
+class _VerdictItem(BaseModel):
+    verdict: _Verdict
+
+
+class _RelevancyResult(BaseModel):
+    verdicts: list[_VerdictItem]
+
+
+# ── Metric implementation ─────────────────────────────────────────────────────
+
+
+def _answer_relevancy(
+    claims: list[Claim],
+    question: str,
+    judge_model: str,
+) -> MetricResult:
+    """Classify each claim as relevant / irrelevant / idk; score = relevant / total."""
+    numbered = "\n".join(f"{i + 1}. {c.text}" for i, c in enumerate(claims))
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a relevancy judge.",
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Question: {question}\n\n"
+                f"Statements extracted from an answer (one per line):\n{numbered}\n\n"
+                "For each statement classify its relevance to the question above:\n"
+                "  - 'relevant'   : the statement directly addresses or helps answer the question\n"
+                "  - 'irrelevant' : the statement does not relate to the question\n"
+                "  - 'idk'        : cannot determine relevance (ambiguous or incomplete)\n\n"
+                "Return a JSON object with a single key 'verdicts' containing a list of objects "
+                "{\"verdict\": \"relevant\"|\"irrelevant\"|\"idk\"} in the same order as the statements."
+            ),
+        },
+    ]
+    llm = get_llm("relevance_answer", _RelevancyResult, judge_model)
+    response = llm.invoke(messages)
+    result: _RelevancyResult = response["parsed"]
+
+    if result is None or not result.verdicts:
+        log.warning("Answer relevancy LLM call returned no verdicts")
+        return MetricResult(
+            name="answer_relevancy",
+            category=MetricCategory.ANSWER,
+            error="No verdicts returned",
+        )
+
+    verdicts = result.verdicts[: len(claims)]
+    relevant_count = sum(1 for v in verdicts if v.verdict == "relevant")
+    score = relevant_count / len(verdicts)
+
+    per_claim = [
+        Relevancy(**c.model_dump(), verdict=v.verdict)
+        for c, v in zip(claims, verdicts)
+    ]
+
+    log.success(
+        f"answer_relevancy={score:.3f}  "
+        f"(relevant={relevant_count}  irrelevant={sum(1 for v in verdicts if v.verdict == 'irrelevant')}  "
+        f"idk={sum(1 for v in verdicts if v.verdict == 'idk')}  total={len(verdicts)})"
+    )
+    return MetricResult(
+        name="answer_relevancy",
+        category=MetricCategory.ANSWER,
+        score=score,
+        result=per_claim,
+    )
+
+
+# ── Public entry point ────────────────────────────────────────────────────────
+
 
 def run(
-    context: List[str],
-    claims: List[str],
-    generation: str,
+    claims: list[Claim],
     question: Optional[str] = None,
-    ground_truth: Optional[str] = None,
-    judge_model: str = "gpt-4o-mini",
-    enable_faithfulness: bool = True,
+    judge_model: str = DEFAULT_JUDGE_MODEL,
     enable_answer_relevancy: bool = True,
 ) -> list[MetricResult]:
-    """Compute RAGAS metrics on the generation + retrieved evidence.
+    """Compute answer relevancy using pre-extracted claims.
 
     Args:
-        generation: The LLM-generated text to evaluate.
-        context: Evidence passages from the Evidence Router.
-        question: The original query/question (improves answer relevancy score).
-        ground_truth: Optional reference answer (enables context_recall).
-        judge_model: LiteLLM model string used as the RAGAS judge LLM.
-        enable_faithfulness: Whether to compute faithfulness.
+        claims:                  Deduplicated claims from the mmr_deduplicator node.
+        question:                Original query — required for answer relevancy.
+        judge_model:             LiteLLM model string.
         enable_answer_relevancy: Whether to compute answer relevancy.
 
     Returns:
-        list[MetricResult] — one per computed metric.
-        faithfulness / answer_relevancy → ANSWER category.
-        context_precision / context_recall → RETRIEVAL category (if ground_truth provided).
+        list[MetricResult] — one entry per enabled metric.
     """
-
-    metrics = []
-    if enable_faithfulness:
-        metrics.append(Faithfulness())
-    if enable_answer_relevancy:
-        metrics.append(AnswerRelevancy())
-
-    if not metrics:
+    if not claims:
+        log.warning("No claims provided — skipping answer relevancy")
         return []
 
-    data: dict = {
-        "question": [question or ""],
-        "answer": [generation],
-        "contexts": [context],
-    }
-    if ground_truth:
-        data["ground_truth"] = [ground_truth]
-        log.info("ground_truth provided — context_recall enabled")
-
-    dataset = Dataset.from_dict(data)
-    result = evaluate(dataset, metrics=metrics)
-    scores = result.to_pandas().iloc[0].to_dict()
-
-    log.success(
-        f"faithfulness={scores.get('faithfulness')}  "
-        f"answer_relevancy={scores.get('answer_relevancy')}"
-    )
-
     results: list[MetricResult] = []
-    if enable_faithfulness and scores.get("faithfulness") is not None:
-        results.append(
-            MetricResult(
-                name="faithfulness",
-                category=MetricCategory.ANSWER,
-                score=scores["faithfulness"],
-            )
-        )
-    if enable_answer_relevancy and scores.get("answer_relevancy") is not None:
-        results.append(
-            MetricResult(
-                name="answer_relevancy",
-                category=MetricCategory.ANSWER,
-                score=scores["answer_relevancy"],
-            )
-        )
-    if scores.get("context_precision") is not None:
-        results.append(
-            MetricResult(
-                name="context_precision",
-                category=MetricCategory.RETRIEVAL,
-                score=scores["context_precision"],
-            )
-        )
-    if scores.get("context_recall") is not None:
-        results.append(
-            MetricResult(
-                name="context_recall",
-                category=MetricCategory.RETRIEVAL,
-                score=scores["context_recall"],
-            )
-        )
+
+    if enable_answer_relevancy:
+        if not question:
+            log.info("No question provided — skipping answer relevancy")
+        else:
+            results.append(_answer_relevancy(claims, question, judge_model))
 
     return results
+
+
+# ── Manual smoke test ─────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    """
+    Real answer relevancy test — mirrors DeepEval's verdict-based approach.
+
+    Question: "What causes type 2 diabetes?"
+
+    Claims:
+      - claim_1 → relevant   (insulin resistance is a direct cause)
+      - claim_2 → relevant   (obesity is a known contributing factor)
+      - claim_3 → irrelevant (peripheral neuropathy is a complication, not a cause)
+      - claim_4 → irrelevant (transformer architecture is off-topic)
+
+    Expected score: 2/4 = 0.5
+    """
+    claims = [
+        Claim(
+            text="Insulin resistance in muscle and fat cells causes blood glucose to remain elevated.",
+            source_chunk_index=0,
+            confidence=0.95,
+        ),
+        Claim(
+            text="Excess body weight, particularly visceral fat, is a major contributing factor to type 2 diabetes.",
+            source_chunk_index=0,
+            confidence=0.90,
+        ),
+        Claim(
+            text="Poorly controlled type 2 diabetes can lead to peripheral neuropathy over time.",
+            source_chunk_index=1,
+            confidence=0.85,
+        ),
+        Claim(
+            text="The Transformer model uses multi-head self-attention to process token sequences in parallel.",
+            source_chunk_index=2,
+            confidence=0.80,
+        ),
+    ]
+
+    question = "What causes type 2 diabetes?"
+    result = _answer_relevancy(claims, question, judge_model="gpt-4o-mini")
+
+    print(result)
