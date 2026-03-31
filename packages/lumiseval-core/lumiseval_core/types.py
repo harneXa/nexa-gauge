@@ -1,11 +1,18 @@
 """Shared domain types for lumis-eval."""
 
 from enum import Enum
-from typing import Any, Optional, Union, List
+from typing import Any, Optional, Union
 
 from pydantic import BaseModel, Field
 
 from lumiseval_core.constants import (
+    AVG_CLAIM_TOKENS,
+    AVG_DEEPEVAL_INPUT_OVERHEAD_TOKENS,
+    AVG_DEEPEVAL_OUTPUT_OVERHEAD_TOKENS,
+    AVG_GEVAL_INPUT_OVERHEAD_TOKENS,
+    AVG_GEVAL_OUTPUT_OVERHEAD_TOKENS,
+    AVG_OUTPUT_TOKENS_BOOLEAN_VERDICT,
+    AVG_OUTPUT_TOKENS_JSON_VERDICT,
     DEFAULT_DATASET_NAME,
     DEFAULT_JUDGE_MODEL,
     DEFAULT_SPLIT,
@@ -32,13 +39,6 @@ class EvidenceSource(str, Enum):
     MCP = "mcp"
     WEB = "web"
     NONE = "none"
-
-
-class Severity(str, Enum):
-    LOW = "LOW"
-    MEDIUM = "MEDIUM"
-    HIGH = "HIGH"
-    CRITICAL = "CRITICAL"
 
 
 class MetricCategory(str, Enum):
@@ -77,72 +77,108 @@ class EvidencePassage(BaseModel):
     retrieval_score: float
     source: EvidenceSource
 
+
+class EvidenceResult(BaseModel):
+    """Evidence retrieved for a single claim, including verdict and source passages."""
+
+    claim_text: str
+    source: EvidenceSource
+    passages: list[EvidencePassage] = Field(default_factory=list)
+    verdict: ClaimVerdict = ClaimVerdict.UNVERIFIABLE
+    no_evidence_found: bool = False
+
+
 class RecordMeta(BaseModel):
-    chars: int
-    context_chunks: int
-    context_tokens: int
-    estimated_chunks: int
-    estimated_claims: int
-    generation_chunks: int
-    generation_tokens: int
+    context_token_count: int
+    generation_chunk_count: int
+    generation_token_count: int
+    rubric_token_count: int
+    total_token_count: int
+    estimated_claim_count: int
     has_context: bool
-    has_rubric_rules: bool
-    rubric_tokens: int
-    tokens: int
-    eligible_nodes: List[str]
+    has_rubric: bool
+    eligible_nodes: list[str]
+
 
 class Record(BaseModel):
     case_id: str
     record_index: int
     question: Optional[str]
+    context: Optional[list[str]]
     generation: Optional[str]
-    rubric: Optional[List[str]]
-    context: Optional[List[str]]
+    generation_chunks: Optional[list[str]]
+    rubric: Optional[list[str]]
     record_metadata: RecordMeta
+
+
+class ClaimCostMeta(BaseModel):
+    eligible_records: int
+    avg_generation_chunks: float
+    avg_generation_tokens: float
+    avg_claim_tokens: float = AVG_CLAIM_TOKENS
+    avg_output_token: float = AVG_OUTPUT_TOKENS_JSON_VERDICT
+
+
+class GorundingCostMeta(BaseModel):
+    eligible_records: int
+    avg_claims_per_record: float
+    avg_context_tokens: float
+    avg_claim_tokens: float = AVG_CLAIM_TOKENS
+    avg_output_token: float = AVG_OUTPUT_TOKENS_BOOLEAN_VERDICT
+
+
+class RelevanceCostMeta(BaseModel):
+    eligible_records: int
+    avg_claims_per_record: float
+    avg_question_tokens: float
+    avg_claim_tokens: float = AVG_CLAIM_TOKENS
+    avg_output_token: float = AVG_OUTPUT_TOKENS_JSON_VERDICT
+
+
+class RubricCostMeta(BaseModel):
+    eligible_records: int
+    rule_count: int
+    unique_rule_count: int
+    rule_tokens: float
+    unique_rule_tokens: float
+    avg_input_tokens: float = AVG_GEVAL_INPUT_OVERHEAD_TOKENS
+    avg_output_tokens: float = AVG_GEVAL_OUTPUT_OVERHEAD_TOKENS
+
+
+class RedTeamCostMeta(BaseModel):
+    eligible_records: int
+    avg_input_tokens: float = AVG_DEEPEVAL_INPUT_OVERHEAD_TOKENS
+    avg_output_tokens: float = AVG_DEEPEVAL_OUTPUT_OVERHEAD_TOKENS
+
+
+class CostMetadata(BaseModel):
+    grounding: GorundingCostMeta
+    relevance: RelevanceCostMeta
+    rubric: RubricCostMeta
+    readteam: RedTeamCostMeta
+
 
 class InputMetadata(BaseModel):
     record_count: int
     total_tokens: int  # generation_tokens + context_tokens + rubric_tokens
-    total_chars: int
-    estimated_chunk_count: int  # context_chunk_count + generation_chunk_count (total)
-    estimated_claim_count: int  # generation_chunk_count * CLAIMS_PER_CHUNK
+
     generation_tokens: int = 0  # tokens across all generation fields
     context_tokens: int = 0  # tokens across all context passages
-    rubric_tokens: int = 0  # tokens across all rubric rule statements + conditions
-    context_chunk_count: int = 0  # chunks produced by chunking context passages
+    rubric_tokens: int = 0  # tokens across all rubric rule statements
+    unique_rubric_tokens: int = 0  # tokens across all unique rubric rules
+
+    rubric_rule_count: int = 0  # Total counts of rubrics
+    unique_rubric_rule_count: int = 0  # Total counts of unique rubrics
     generation_chunk_count: int = 0  # chunks produced by chunking generation text
 
-    # Record count statistics for each Node
-    eligible_record_count: dict[str, int] = Field(default_factory=dict)
-
-    # Chunk count statistics for each Node
-    eligible_chunk_count: dict[str, int] = Field(default_factory=dict)
-
-    # Claim count statistics for each Node
-    eligible_claim_count: dict[str, int] = Field(default_factory=dict)
-
+    cost_meta: CostMetadata
     # Each Record and its respective metadata
-    record_meta: list[Record] = Field(default_factory=list)
+    records: list[Record] = Field(default_factory=list)
 
 
 class NodeCostBreakdown(BaseModel):
-    judge_calls: int = 0
+    model_calls: int = 0
     cost_usd: float = 0.0
-
-
-class CostEstimate(BaseModel):
-    estimated_judge_calls: int
-    estimated_embedding_calls: int
-    estimated_tavily_calls: int
-    judge_cost_usd: float
-    embedding_cost_usd: float
-    tavily_cost_usd: float
-    total_estimated_usd: float
-    low_usd: float
-    high_usd: float
-    approximate: bool = False
-    approximate_warning: Optional[str] = None
-    node_breakdown: dict[str, NodeCostBreakdown] = Field(default_factory=dict)
 
 
 # ── Unified metric result types ─────────────────────────────────────────────
@@ -202,10 +238,9 @@ class EvalCase(BaseModel):
 class EvalJobConfig(BaseModel):
     job_id: str
     judge_model: str = DEFAULT_JUDGE_MODEL
-    enable_hallucination: bool = True
-    enable_faithfulness: bool = True
-    enable_answer_relevancy: bool = True
-    enable_adversarial: bool = False
+    enable_grounding: bool = True
+    enable_relevance: bool = True
+    enable_redteam: bool = False
     enable_rubric: bool = False
     web_search: bool = False
     evidence_threshold: float = EVIDENCE_VERDICT_SUPPORTED_THRESHOLD
@@ -222,7 +257,25 @@ class EvalJobConfig(BaseModel):
     budget_cap_usd: Optional[float] = None
 
 
-# ── Report ──────────────────────────────────────────────────────────────────
+# ── Cost estimate ────────────────────────────────────────────────────────────
+
+
+class CostEstimate(BaseModel):
+    estimated_judge_calls: int
+    estimated_embedding_calls: int
+    estimated_tavily_calls: int
+    judge_cost_usd: float
+    embedding_cost_usd: float
+    tavily_cost_usd: float
+    total_estimated_usd: float
+    low_usd: float
+    high_usd: float
+    approximate: bool = False
+    approximate_warning: Optional[str] = None
+    node_breakdown: dict[str, NodeCostBreakdown] = Field(default_factory=dict)
+
+
+# ── Report ───────────────────────────────────────────────────────────────────
 
 
 class EvalReport(BaseModel):

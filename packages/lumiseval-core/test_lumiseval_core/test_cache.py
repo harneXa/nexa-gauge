@@ -25,13 +25,9 @@ def test_compute_case_hash_changes_when_reference_files_change() -> None:
 
 
 def test_compute_case_hash_changes_when_rubric_pass_condition_changes() -> None:
-    rules_a = [
-        Rubric(id="R-1", statement="Mention year", pass_condition="Must include a year.")
-    ]
+    rules_a = [Rubric(id="R-1", statement="Mention year", pass_condition="Must include a year.")]
     rules_b = [
-        Rubric(
-            id="R-1", statement="Mention year", pass_condition="Must include month and year."
-        )
+        Rubric(id="R-1", statement="Mention year", pass_condition="Must include month and year.")
     ]
 
     h1 = compute_case_hash(

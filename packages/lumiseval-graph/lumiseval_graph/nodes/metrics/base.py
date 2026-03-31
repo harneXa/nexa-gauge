@@ -14,10 +14,17 @@ Subclass contract:
 """
 
 from abc import ABC
-from typing import Any
+from typing import Any, Union
 
 from lumiseval_core.constants import DEFAULT_JUDGE_MODEL
-from lumiseval_core.types import MetricResult, NodeCostBreakdown
+from lumiseval_core.types import (
+    GorundingCostMeta,
+    MetricResult,
+    NodeCostBreakdown,
+    RedTeamCostMeta,
+    RelevanceCostMeta,
+    RubricCostMeta,
+)
 
 
 class BaseMetricNode(ABC):
@@ -54,11 +61,7 @@ class BaseMetricNode(ABC):
     def cost_estimate(
         self,
         *,
-        eligible_records: int = 0,
-        avg_claims_per_record: float = 0.0,
-        avg_context_tokens: int = 0,
-        avg_question_tokens: int = 0,
-        rubric_rule_count: int = 0,
+        cost_meta: Union[GorundingCostMeta, RelevanceCostMeta, RubricCostMeta, RedTeamCostMeta],
     ) -> NodeCostBreakdown:
         """Estimate cost for this node without running any LLM calls.
 
@@ -78,4 +81,4 @@ class BaseMetricNode(ABC):
             NodeCostBreakdown. Base returns zeros; subclasses override with
             real token arithmetic.
         """
-        return NodeCostBreakdown(judge_calls=0, cost_usd=0.0)
+        return NodeCostBreakdown(model_calls=0, cost_usd=0.0)

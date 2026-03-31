@@ -9,13 +9,8 @@ tracking are centralised.
 TODO: Tune the extraction prompt for domain-specific claim types.
 """
 
-from lumiseval_core.constants import (
-    CHUNK_SIZE_TOKENS,
-    COST_AVG_CLAIM_TOKENS,
-    COST_AVG_OUTPUT_TOKENS_JSON_VERDICT,
-    DEFAULT_JUDGE_MODEL,
-)
-from lumiseval_core.types import Chunk, Claim, NodeCostBreakdown
+from lumiseval_core.constants import DEFAULT_JUDGE_MODEL
+from lumiseval_core.types import Chunk, Claim, ClaimCostMeta, NodeCostBreakdown
 from pydantic import BaseModel, Field
 
 from lumiseval_graph.llm.gateway import get_llm
@@ -111,9 +106,7 @@ class ClaimExtractorNode:
     def cost_estimate(
         self,
         *,
-        eligible_records: int,
-        avg_chunks_per_record: float,
-        avg_chunk_tokens: int,
+        cost_meta: ClaimCostMeta,
         **_ignored,
     ) -> NodeCostBreakdown:
         """Estimate LLM cost for claim extraction without running any calls.
@@ -126,23 +119,39 @@ class ClaimExtractorNode:
         Returns:
             NodeCostBreakdown with judge_calls and cost_usd.
         """
-        if eligible_records == 0:
-            return NodeCostBreakdown(judge_calls=0, cost_usd=0.0)
+        if cost_meta.eligible_records == 0:
+            return NodeCostBreakdown(model_calls=0, cost_usd=0.0)
 
         pricing = get_model_pricing(self.model)
-        chunks_per_record = max(1.0, avg_chunks_per_record)
-        total_calls = round(eligible_records * chunks_per_record)
+        chunks_per_record = max(1.0, cost_meta.avg_generation_chunks)
+        total_calls = round(cost_meta.eligible_records * chunks_per_record)
 
-        input_tokens = self.static_prompt_tokens + avg_chunk_tokens
+        input_tokens = self.static_prompt_tokens + cost_meta.avg_generation_tokens
         # One claim per chunk: claim text tokens + confidence float (JSON verdict overhead)
-        output_tokens = COST_AVG_CLAIM_TOKENS + COST_AVG_OUTPUT_TOKENS_JSON_VERDICT
+        output_tokens = cost_meta.avg_claim_tokens + cost_meta.avg_output_token
 
         cost_per_call = cost_usd(input_tokens, pricing, "input") + cost_usd(
             output_tokens, pricing, "output"
         )
         return NodeCostBreakdown(
-            judge_calls=total_calls,
+            model_calls=total_calls,
             cost_usd=round(total_calls * cost_per_call, 6),
+        )
+
+    @classmethod
+    def cost_formula(cls, cost_meta: ClaimCostMeta) -> str:
+        chunks = max(1.0, cost_meta.avg_generation_chunks)
+        total_calls = round(cost_meta.eligible_records * chunks)
+        prompt_t = cls.static_prompt_tokens
+        gen_t = round(cost_meta.avg_generation_tokens)
+        input_t = prompt_t + gen_t
+        out_claim = round(cost_meta.avg_claim_tokens)
+        out_verdict = round(cost_meta.avg_output_token)
+        output_t = out_claim + out_verdict
+        return (
+            f"{cost_meta.eligible_records} recs × {chunks:.1f} chunks/rec = {total_calls} calls\n"
+            f"  input_tokens  = {prompt_t} (prompt) + {gen_t} (generation_chunk) = {input_t} tok/call\n"
+            f"  output_tokens = {out_claim} (claim_text) + {out_verdict} (json_verdict) = {output_t} tok/call"
         )
 
 

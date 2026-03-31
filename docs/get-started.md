@@ -180,10 +180,9 @@ Case hash includes:
 
 Config hash includes:
 - `judge_model`
-- `enable_hallucination`
-- `enable_faithfulness`
-- `enable_answer_relevancy`
-- `enable_adversarial`
+- `enable_grounding`
+- `enable_relevance`
+- `enable_redteam`
 - `enable_rubric`
 - `web_search`
 - `evidence_threshold`
@@ -238,9 +237,8 @@ curl -X POST "http://localhost:8080/jobs" \
     "ground_truth": "The Eiffel Tower is a wrought-iron lattice tower in Paris.",
     "judge_model": "gpt-4o-mini",
     "web_search": false,
-    "enable_hallucination": true,
-    "enable_faithfulness": true,
-    "enable_answer_relevancy": true
+    "enable_grounding": true,
+    "enable_relevance": true
   }'
 ```
 
@@ -278,10 +276,9 @@ Optional:
 - `reference_files: list[str]`
 - `judge_model: str`
 - `web_search: bool`
-- `enable_hallucination: bool`
-- `enable_faithfulness: bool`
-- `enable_answer_relevancy: bool`
-- `enable_adversarial: bool`
+- `enable_grounding: bool`
+- `enable_relevance: bool`
+- `enable_redteam: bool`
 - `enable_rubric: bool`
 - `evidence_threshold: float`
 - `budget_cap_usd: float | null`

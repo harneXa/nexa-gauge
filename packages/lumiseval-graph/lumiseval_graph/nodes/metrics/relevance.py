@@ -19,16 +19,12 @@ Using claims (not chunks) as statements because:
 
 from typing import Literal, Optional
 
-from lumiseval_core.constants import (
-    COST_AVG_CLAIM_TOKENS,
-    COST_AVG_OUTPUT_TOKENS_JSON_VERDICT,
-    COST_AVG_QUESTION_TOKENS,
-)
 from lumiseval_core.types import (
     Claim,
     MetricCategory,
     MetricResult,
     NodeCostBreakdown,
+    RelevanceCostMeta,
     Relevancy,
 )
 from pydantic import BaseModel
@@ -65,6 +61,10 @@ class RelevanceNode(BaseMetricNode):
         "Return a JSON object with a single key 'verdicts' containing a list of objects "
         '{"verdict": "relevant"|"irrelevant"|"idk"} in the same order as the statements.'
     )
+
+    # Static (non-placeholder) token overhead shared by every call — computed
+    # once at class definition time from the prompts above.
+    static_prompt_tokens: int = count_tokens(SYSTEM_PROMPT) + template_static_tokens(USER_PROMPT)
 
     def _answer_relevancy(self, claims: list[Claim], question: str) -> MetricResult:
         """Classify each claim as relevant / irrelevant / idk; score = relevant / total."""
@@ -113,14 +113,14 @@ class RelevanceNode(BaseMetricNode):
         *,
         claims: list[Claim],
         question: Optional[str] = None,
-        enable_answer_relevancy: bool = True,
+        enable_relevance: bool = True,
     ) -> list[MetricResult]:
         """Compute answer relevancy using pre-extracted claims.
 
         Args:
             claims:                  Deduplicated claims from the mmr_deduplicator node.
             question:                Original query — required for answer relevancy.
-            enable_answer_relevancy: Whether to compute answer relevancy.
+            enable_relevance: Whether to compute answer relevancy.
 
         Returns:
             list[MetricResult] — one entry per enabled metric.
@@ -131,7 +131,7 @@ class RelevanceNode(BaseMetricNode):
 
         results: list[MetricResult] = []
 
-        if enable_answer_relevancy:
+        if enable_relevance:
             if not question:
                 log.info("No question provided — skipping answer relevancy")
             else:
@@ -142,36 +142,44 @@ class RelevanceNode(BaseMetricNode):
     def cost_estimate(
         self,
         *,
-        eligible_records: int = 0,
-        avg_claims_per_record: float = 0.0,
-        avg_question_tokens: int = COST_AVG_QUESTION_TOKENS,
+        cost_meta: RelevanceCostMeta,
         **_ignored,
     ) -> NodeCostBreakdown:
-        if eligible_records == 0:
-            return NodeCostBreakdown(judge_calls=0, cost_usd=0.0)
+        if cost_meta.eligible_records == 0:
+            return NodeCostBreakdown(model_calls=0, cost_usd=0.0)
 
         pricing = get_model_pricing(self.judge_model)
-        claims = max(1.0, avg_claims_per_record)
+        claims = max(1.0, cost_meta.avg_claims_per_record)
 
         input_tokens = (
-            _RELEVANCE_STATIC_TOKENS + avg_question_tokens + round(claims * COST_AVG_CLAIM_TOKENS)
+            self.static_prompt_tokens
+            + cost_meta.avg_question_tokens
+            + round(claims * cost_meta.avg_claim_tokens)
         )
-        output_tokens = round(claims * COST_AVG_OUTPUT_TOKENS_JSON_VERDICT)
+        output_tokens = round(claims * cost_meta.avg_output_token)
 
         cost_per_record = cost_usd(input_tokens, pricing, "input") + cost_usd(
             output_tokens, pricing, "output"
         )
         return NodeCostBreakdown(
-            judge_calls=eligible_records,
-            cost_usd=round(eligible_records * cost_per_record, 6),
+            model_calls=cost_meta.eligible_records,
+            cost_usd=round(cost_meta.eligible_records * cost_per_record, 6),
         )
 
+    @classmethod
+    def cost_formula(cls, cost_meta: RelevanceCostMeta) -> str:
+        claims = max(1.0, cost_meta.avg_claims_per_record)
+        prompt_t = cls.static_prompt_tokens
+        q_t = round(cost_meta.avg_question_tokens)
+        claims_t = round(claims * cost_meta.avg_claim_tokens)
+        input_t = prompt_t + q_t + claims_t
+        output_t = round(claims * cost_meta.avg_output_token)
+        return (
+            f"{cost_meta.eligible_records} recs, 1 call/rec (all claims batched), {cost_meta.eligible_records} calls\n"
+            f"  input_tokens  = {prompt_t} (prompt) + {q_t} (question) + {claims_t} ({claims:.1f} claims × {round(cost_meta.avg_claim_tokens)}t) = {input_t} tok/call\n"
+            f"  output_tokens = {output_t} ({claims:.1f} claims × {round(cost_meta.avg_output_token)}t json_verdict) = {output_t} tok/call"
+        )
 
-# Pre-computed once at module load — static (non-placeholder) token overhead
-# for RelevanceNode's prompts.
-_RELEVANCE_STATIC_TOKENS: int = count_tokens(RelevanceNode.SYSTEM_PROMPT) + template_static_tokens(
-    RelevanceNode.USER_PROMPT
-)
 
 # ── Manual smoke test ─────────────────────────────────────────────────────────
 

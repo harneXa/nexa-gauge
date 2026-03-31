@@ -108,9 +108,7 @@ def compute_case_hash(
     Changing generation / question / ground_truth / context / rubric rules / reference_files
     produces a different hash, which causes a cache miss for the affected case.
     """
-    rubric_text = "|".join(
-        sorted(f"{r.id}\x1f{r.statement}\x1f{r.pass_condition}" for r in rubric)
-    )
+    rubric_text = "|".join(sorted(f"{r.id}\x1f{r.statement}\x1f{r.pass_condition}" for r in rubric))
     context_text = "|".join(context or [])
     reference_text = "|".join(sorted(reference_files or []))
     raw = (
@@ -127,10 +125,9 @@ def compute_config_hash(job_config: EvalJobConfig) -> str:
     """
     raw = (
         f"{job_config.judge_model}"
-        f"|{job_config.enable_hallucination}"
-        f"|{job_config.enable_faithfulness}"
-        f"|{job_config.enable_answer_relevancy}"
-        f"|{job_config.enable_adversarial}"
+        f"|{job_config.enable_grounding}"
+        f"|{job_config.enable_relevance}"
+        f"|{job_config.enable_redteam}"
         f"|{job_config.enable_rubric}"
         f"|{job_config.web_search}"
         f"|{job_config.evidence_threshold}"

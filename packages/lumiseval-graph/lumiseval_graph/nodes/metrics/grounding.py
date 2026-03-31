@@ -7,14 +7,10 @@ Uses a single batched LLM call to verify all claims at once.
 Returns a MetricResult with score = fraction of claims supported by context (1.0 = all supported).
 """
 
-from lumiseval_core.constants import (
-    COST_AVG_CLAIM_TOKENS,
-    COST_AVG_CONTEXT_TOKENS,
-    COST_AVG_OUTPUT_TOKENS_BOOLEAN_VERDICT,
-)
 from lumiseval_core.types import (
     Claim,
     Faithfulness,
+    GorundingCostMeta,
     MetricCategory,
     MetricResult,
     NodeCostBreakdown,
@@ -45,6 +41,10 @@ class GroundingNode(BaseMetricNode):
         "a list of booleans — true if supported, false if not — in the same order as "
         "the claims."
     )
+
+    # Static (non-placeholder) token overhead shared by every call — computed
+    # once at class definition time from the prompts above.
+    static_prompt_tokens: int = count_tokens(SYSTEM_PROMPT) + template_static_tokens(USER_PROMPT)
 
     def _faithfulness(self, claims: list[Claim], context: list[str]) -> MetricResult:
         """Check each claim against context passages; return fraction supported."""
@@ -87,7 +87,7 @@ class GroundingNode(BaseMetricNode):
         *,
         claims: list[Claim],
         context: list[str],
-        enable_faithfulness: bool = True,
+        enable_grounding: bool = True,
     ) -> list[MetricResult]:
         if not claims:
             log.warning("No claims provided — skipping faithfulness")
@@ -95,7 +95,7 @@ class GroundingNode(BaseMetricNode):
 
         results: list[MetricResult] = []
 
-        if enable_faithfulness:
+        if enable_grounding:
             if not context:
                 log.info("No context passages — skipping faithfulness")
             else:
@@ -105,36 +105,44 @@ class GroundingNode(BaseMetricNode):
     def cost_estimate(
         self,
         *,
-        eligible_records: int = 0,
-        avg_claims_per_record: float = 0.0,
-        avg_context_tokens: int = COST_AVG_CONTEXT_TOKENS,
+        cost_meta: GorundingCostMeta,
         **_ignored,
     ) -> NodeCostBreakdown:
-        if eligible_records == 0:
-            return NodeCostBreakdown(judge_calls=0, cost_usd=0.0)
+        if cost_meta.eligible_records == 0:
+            return NodeCostBreakdown(model_calls=0, cost_usd=0.0)
 
         pricing = get_model_pricing(self.judge_model)
-        claims = max(1.0, avg_claims_per_record)
+        claims = max(1.0, cost_meta.avg_claims_per_record)
 
         input_tokens = (
-            _GROUNDING_STATIC_TOKENS + avg_context_tokens + round(claims * COST_AVG_CLAIM_TOKENS)
+            self.static_prompt_tokens
+            + cost_meta.avg_context_tokens
+            + round(claims * cost_meta.avg_claim_tokens)
         )
-        output_tokens = round(claims * COST_AVG_OUTPUT_TOKENS_BOOLEAN_VERDICT)
+        output_tokens = round(claims * cost_meta.avg_output_token)
 
         cost_per_record = cost_usd(input_tokens, pricing, "input") + cost_usd(
             output_tokens, pricing, "output"
         )
         return NodeCostBreakdown(
-            judge_calls=eligible_records,
-            cost_usd=round(eligible_records * cost_per_record, 6),
+            model_calls=cost_meta.eligible_records,
+            cost_usd=round(cost_meta.eligible_records * cost_per_record, 6),
         )
 
+    @classmethod
+    def cost_formula(cls, cost_meta: GorundingCostMeta) -> str:
+        claims = max(1.0, cost_meta.avg_claims_per_record)
+        prompt_t = cls.static_prompt_tokens
+        ctx_t = round(cost_meta.avg_context_tokens)
+        claims_t = round(claims * cost_meta.avg_claim_tokens)
+        input_t = prompt_t + ctx_t + claims_t
+        output_t = round(claims * cost_meta.avg_output_token)
+        return (
+            f"{cost_meta.eligible_records} recs, 1 call/rec (all claims batched), {cost_meta.eligible_records} calls\n"
+            f"  input_tokens  = {prompt_t} (prompt) + {ctx_t} (context) + {claims_t} ({claims:.1f} claims × {round(cost_meta.avg_claim_tokens)}t) = {input_t} tok/call\n"
+            f"  output_tokens = {output_t} ({claims:.1f} claims × {round(cost_meta.avg_output_token)}t bool_verdict) = {output_t} tok/call"
+        )
 
-# Pre-computed once at module load — static (non-placeholder) token overhead
-# for GroundingNode's prompts. Every call pays this regardless of content size.
-_GROUNDING_STATIC_TOKENS: int = count_tokens(GroundingNode.SYSTEM_PROMPT) + template_static_tokens(
-    GroundingNode.USER_PROMPT
-)
 
 # ── Manual smoke test ─────────────────────────────────────────────────────────
 

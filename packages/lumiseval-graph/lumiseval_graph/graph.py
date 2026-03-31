@@ -159,13 +159,13 @@ def node_relevance(state: EvalState) -> dict:
     claims = state.get("unique_claims") or []
     if not claims:
         return {"relevance_metrics": []}
-    if not state["job_config"].enable_answer_relevancy:
+    if not state["job_config"].enable_relevance:
         return {"relevance_metrics": []}
     model = get_judge_model("relevance", state["job_config"].judge_model)
     results = RelevanceNode(judge_model=model).run(
         claims=claims,
         question=state.get("question"),
-        enable_answer_relevancy=True,
+        enable_relevance=True,
     )
     return {"relevance_metrics": results}
 
@@ -175,20 +175,20 @@ def node_grounding(state: EvalState) -> dict:
     claims = state.get("unique_claims") or []
     if not claims or not state.get("context"):
         return {"grounding_metrics": []}
-    if not state["job_config"].enable_faithfulness:
+    if not state["job_config"].enable_grounding:
         return {"grounding_metrics": []}
     model = get_judge_model("grounding", state["job_config"].judge_model)
     results = GroundingNode(judge_model=model).run(
         claims=claims,
         context=state["context"],
-        enable_faithfulness=True,
+        enable_grounding=True,
     )
     return {"grounding_metrics": results}
 
 
 @observe(name="node_redteam")
 def node_adversarial(state: EvalState) -> dict:
-    if not state["job_config"].enable_adversarial:
+    if not state["job_config"].enable_redteam:
         return {"redteam_metrics": []}
     model = get_judge_model("redteam", state["job_config"].judge_model)
     results = RedteamNode(judge_model=model).run(generation=state["generation"])

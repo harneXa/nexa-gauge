@@ -75,9 +75,9 @@ flowchart TD
   N8 --> N9["EvalReport"]
 
   subgraph CFG["Metric Activation from EvalJobConfig"]
-    C1["enable_faithfulness + enable_answer_relevancy"]
-    C2["enable_hallucination"]
-    C3["enable_adversarial"]
+    C2["enable_grounding"]
+    C1["enable_relevance"]
+    C3["enable_redteam"]
     C4["enable_rubric + rubric"]
   end
 
