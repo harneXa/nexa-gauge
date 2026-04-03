@@ -2,9 +2,8 @@
 LangGraph Orchestration Graph — the core evaluation pipeline.
 
 Node sequence:
-  scan → estimate → [user approve gate] → chunk →
-  claims → dedupe → retrieve →
-  [parallel: relevance, grounding, redteam, rubric] →
+  scan → chunk → claims → dedupe →
+  [parallel: relevance, grounding, redteam, rubric, reference] →
   eval → result
 
 TODO:
@@ -30,16 +29,16 @@ from lumiseval_core.types import (
     Rubric,
 )
 from lumiseval_evidence.indexer import index_file
-from lumiseval_evidence.mmr import deduplicate
 from lumiseval_ingest.chunker import chunk_text
 from lumiseval_ingest.scanner import scan_text
 
 from .llm import get_judge_model
 from .log import get_node_logger, print_pipeline_footer, print_pipeline_header
-from .nodes import claim_extractor, cost_estimator, eval
-from .nodes.metrics.reference import ReferenceMetricsNode
+from .nodes import claim_extractor, eval
+from .nodes.metrics.dedupe import DedupeNode
 from .nodes.metrics.grounding import GroundingNode
 from .nodes.metrics.redteam import RedteamNode
+from .nodes.metrics.reference import ReferenceNode
 from .nodes.metrics.relevance import RelevanceNode
 from .nodes.metrics.rubric import RubricNode
 from .observability import observe, score_trace, update_trace
@@ -48,8 +47,6 @@ logger = logging.getLogger(__name__)
 
 # Module-level node loggers — one per pipeline node
 _log_scanner = get_node_logger("scan")
-_log_cost = get_node_logger("estimate")
-_log_confirm = get_node_logger("approve")
 _log_chunker = get_node_logger("chunk")
 _log_claims = get_node_logger("claims")
 _log_mmr = get_node_logger("dedupe")
@@ -70,17 +67,16 @@ class EvalState(TypedDict):
     question: Optional[str]       # Original query; read by relevance for answer-relevancy scoring
     reference: Optional[str]      # Ground-truth answer; read by scan (eligibility flag) and reference node (ROUGE/BLEU/METEOR)
     context: Optional[list[str]]  # Retrieved passages; gates chunk → claims → grounding path; read by grounding
-    rubric: list[Rubric]          # GEval rules; gates rubric node; count passed to estimate for cost
-    
-    
-    target_node: Optional[str]    # Pipeline stop point used by CachedNodeRunner; passed to estimate for per-target cost
+    rubric: list[Rubric]          # GEval rules; gates rubric node
+
+
+    target_node: Optional[str]    # Pipeline stop point used by CachedNodeRunner
     reference_files: list[str]    # File paths indexed into LanceDB before the graph runs (in run_graph, not inside nodes)
     job_config: EvalJobConfig     # Controls enable_* flags, judge_model, job_id; read by every node
 
     # ── Intermediate: written by one node, consumed by downstream nodes ───
-    metadata: Optional[InputMetadata]      # Token/eligibility stats; written by scan, read by estimate
-    cost_estimate: Optional[CostEstimate]  # Pre-run cost breakdown; written by estimate, read by eval
-    confirmed: bool                        # Passthrough flag; written by approve (always True); not read by other nodes
+    metadata: Optional[InputMetadata]      # Token/eligibility stats; written by scan
+    cost_estimate: Optional[CostEstimate]  # Optional pre-run cost breakdown; injected by caller/runner for eval
     chunks: list[Chunk]                    # Generation split into ~512-token chunks; written by chunk, read by claims
     raw_claims: list[Claim]                # Atomic claims extracted per chunk; written by claims, read by dedupe
     unique_claims: list[Claim]             # MMR-deduplicated claims; written by dedupe, read by relevance and grounding
@@ -116,34 +112,14 @@ def node_metadata_scanner(state: EvalState) -> dict:
     return {"metadata": meta}
 
 
-@observe(name="node_estimate")
-def node_cost_estimator(state: EvalState) -> dict:
-    estimate = cost_estimator.estimate(
-        state["metadata"],
-        state["job_config"],
-        target_node=state.get("target_node"),
-        rubric_rule_count=len(state.get("rubric") or []),
-    )
-    if estimate.approximate_warning:
-        _log_cost.warning(estimate.approximate_warning)
-
-    return {"cost_estimate": estimate}
-
-
-@observe(name="node_approve")
-def node_confirm_gate(state: EvalState) -> dict:
-    # In API mode, confirmation is handled via the request payload (acknowledge=True).
-    # In CLI mode, the CLI layer prompts interactively before calling run_graph().
-    # This node is a passthrough — confirmation is expected before graph execution.
-    _log_confirm.info("Passthrough — confirmation already handled by caller")
-    return {"confirmed": True}
-
-
 @observe(name="node_chunk")
 def node_chunk(state: EvalState) -> dict:
     if not state.get("context"):
         return {"chunks": []}
-    chunks = chunk_text(state["generation"])
+    chunks = chunk_text(
+        state["generation"], 
+        chunk_size=state["job_config"].chunk_size
+    )
     return {"chunks": chunks}
 
 
@@ -161,7 +137,7 @@ def node_dedupe(state: EvalState) -> dict:
     raw = state["raw_claims"]
     if not raw:
         return {"unique_claims": []}
-    unique, dedup_map = deduplicate(raw)
+    unique = DedupeNode(strategy="mmr").run(claims=raw)
     return {"unique_claims": unique}
 
 
@@ -226,7 +202,7 @@ def node_reference(state: EvalState) -> dict:
     reference = state.get("reference")
     if not reference:
         return {"reference_metrics": []}
-    results = ReferenceMetricsNode().run(
+    results = ReferenceNode().run(
         generation=state["generation"],
         reference=reference,
         enable_generation_metrics=True,
@@ -257,8 +233,6 @@ def build_graph() -> StateGraph:
     g = StateGraph(EvalState)
 
     g.add_node("scan", node_metadata_scanner)
-    g.add_node("estimate", node_cost_estimator)
-    g.add_node("approve", node_confirm_gate)
     g.add_node("chunk", node_chunk)
     g.add_node("claims", node_claims)
     g.add_node("dedupe", node_dedupe)
@@ -270,16 +244,14 @@ def build_graph() -> StateGraph:
     g.add_node("eval", node_eval)
 
     g.set_entry_point("scan")
-    g.add_edge("scan", "estimate")
-    g.add_edge("estimate", "approve")
-    g.add_edge("approve", "chunk")
+    g.add_edge("scan", "chunk")
+    g.add_edge("scan", "redteam")
+    g.add_edge("scan", "rubric")
+    g.add_edge("scan", "reference")
     g.add_edge("chunk", "claims")
     g.add_edge("claims", "dedupe")
     g.add_edge("dedupe", "relevance")
     g.add_edge("dedupe", "grounding")
-    g.add_edge("approve", "redteam")
-    g.add_edge("approve", "rubric")
-    g.add_edge("approve", "reference")
     g.add_edge("relevance", "eval")
     g.add_edge("grounding", "eval")
     g.add_edge("redteam", "eval")
@@ -320,7 +292,6 @@ def build_initial_state(
         job_config=job_config,
         metadata=None,
         cost_estimate=None,
-        confirmed=False,
         chunks=[],
         raw_claims=[],
         unique_claims=[],
@@ -338,12 +309,12 @@ def build_initial_state(
 @observe(name="lumiseval_pipeline")
 def run_graph(
     generation: str,
-    job_config: Optional[EvalJobConfig] = None,
     question: Optional[str] = None,
     reference: Optional[str] = None,
     context: Optional[list[str]] = None,
     rubric: Optional[list[Rubric]] = None,
     reference_files: Optional[list[str]] = None,
+    job_config: Optional[EvalJobConfig] = None,
 ) -> EvalReport:
     """Execute the full evaluation pipeline synchronously.
 

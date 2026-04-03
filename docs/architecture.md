@@ -66,16 +66,14 @@ flowchart TB
         T5["enable_reference"]
     end
 
-    SCAN["🔍 scan\ntokenise · count · eligibility"] --> EST["💰 estimate\ncost forecast"]
-    EST --> APR["✅ approve\nconfirmation gate"]
-    APR -- has generation --> CHK["📄 chunk\n~100-tok windows"]
+    SCAN["🔍 scan\ntokenise · count · eligibility"] --> CHK["📄 chunk\n~100-tok windows"]
     CHK --> CLM["🧩 claims\nextract atomic claims per chunk"]
     CLM --> DDP["🔀 dedupe\nMMR cosine dedup"]
+    SCAN -- has_generation --> RDT
+    SCAN -- has_generation and has rubric --> RBC
+    SCAN -- has_generation and has reference --> REF
     DDP -- has_question --> REL
     DDP -- has_context --> GRD
-    APR -- has_generation --> RDT
-    APR -- has_generation and has rubric --> RBC
-    APR -- has_generation and has reference --> REF
     REL --> EVL["⭐ eval\naggregate · score · report"]
     GRD --> EVL
     RDT --> EVL
@@ -94,8 +92,6 @@ flowchart TB
     RBC:::metric
     REF:::metric
     SCAN:::preflight
-    EST:::preflight
-    APR:::preflight
     CHK:::ctxpath
     CLM:::ctxpath
     DDP:::ctxpath
@@ -131,24 +127,33 @@ flowchart LR
 ```mermaid
 sequenceDiagram
   actor User
+  participant CLIE as "CLI estimate()"
   participant CLI as "CLI run()"
   participant AD as "create_dataset_adapter()"
   participant DA as "DatasetAdapter.iter_cases()"
   participant SC as "scan_cases()"
+  participant PL as "CachedNodeRunner.plan_dataset()"
   participant ES as "CostEstimator(job_config).estimate()"
   participant CN as "CachedNodeRunner.run_case()"
   participant NF as "node function map"
+
+  User->>CLIE: `lumiseval estimate <target_node> --input ...`
+  CLIE->>AD: resolve local / huggingface adapter
+  AD-->>CLIE: adapter instance
+  CLIE->>DA: iter_cases(split, limit)
+  DA-->>CLIE: EvalCase[]
+  CLIE->>SC: scan selected cases
+  SC-->>CLIE: InputMetadata
+  CLIE->>PL: plan_dataset(cases, target_node)
+  PL-->>CLIE: to_run/cached/skipped by node
+  CLIE->>ES: estimate(delta metadata overrides)
+  ES-->>CLIE: CostReport (rich tables printed)
 
   User->>CLI: `lumiseval run <target_node> --input ...`
   CLI->>AD: resolve local / huggingface adapter
   AD-->>CLI: adapter instance
   CLI->>DA: iter_cases(split, limit)
   DA-->>CLI: EvalCase[]
-  CLI->>SC: scan selected cases
-  SC-->>CLI: InputMetadata
-  CLI->>ES: estimate(scan_meta)
-  ES-->>CLI: CostReport (rich table printed inline)
-  CLI->>User: confirm (unless --yes)
 
   loop each EvalCase
     CLI->>CN: run_case(case, node_name, job_config, force)
@@ -219,6 +224,6 @@ This contract is what makes both flows modular:
 ## Current Gaps (Known in Code)
 
 - MCP retrieval is a stub in `retrieve`.
-- API remains synchronous (`POST /jobs` executes inline).
+- API handlers for `/estimate` and `/run` are documented but not implemented yet.
 - `cost_actual_usd` tracking is not fully wired from real LLM usage yet.
 - Persisted jobs/reports storage is not implemented yet.

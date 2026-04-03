@@ -1,4 +1,5 @@
 from lumiseval_core.types import EvalCase, Rubric
+from lumiseval_core.utils import pprint_model
 from lumiseval_ingest.scanner import scan_cases
 
 
@@ -14,6 +15,7 @@ def test_scan_cases_reports_node_eligibility_counts() -> None:
     cases = [
         EvalCase(
             case_id="with-context-and-rubric",
+            question="What is the capital of France?",
             generation="Paris is in France.",
             context=["Paris is the capital of France."],
             rubric=[_rule()],
@@ -30,7 +32,7 @@ def test_scan_cases_reports_node_eligibility_counts() -> None:
     ]
 
     meta = scan_cases(cases)
-
+    # pprint_model(meta)
     assert meta.record_count == 3
 
     # ── Node eligibility via cost_meta ────────────────────────────────────────
@@ -64,7 +66,10 @@ def test_scan_cases_reports_node_eligibility_counts() -> None:
     assert ctx_meta.context_token_count > 0
     assert ctx_meta.rubric_token_count > 0
     assert ctx_meta.total_token_count == (
-        ctx_meta.generation_token_count + ctx_meta.context_token_count + ctx_meta.rubric_token_count
+        ctx_meta.generation_token_count + 
+        ctx_meta.context_token_count + 
+        ctx_meta.rubric_token_count + 
+        ctx_meta.question_token_count
     )
 
     gen_only = next(r for r in meta.records if r.case_id == "generation-only")
@@ -77,4 +82,5 @@ def test_scan_cases_reports_node_eligibility_counts() -> None:
     assert meta.generation_tokens > 0
     assert meta.context_tokens > 0  # from the with-context case
     assert meta.rubric_tokens > 0  # from the two rubric cases
-    assert meta.total_tokens == meta.generation_tokens + meta.context_tokens + meta.rubric_tokens
+    assert meta.total_tokens == meta.question_tokens + meta.generation_tokens + meta.context_tokens + meta.rubric_tokens
+

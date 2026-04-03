@@ -33,7 +33,7 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-from lumiseval_core.pipeline import NODE_ENV_KEY_SUFFIXES as _PIPELINE_ENV_KEYS
+from lumiseval_core.pipeline import NODES_BY_NAME as _NODES_BY_NAME
 
 
 @dataclass
@@ -55,9 +55,9 @@ _SUBMETRIC_ENV_KEYS: dict[str, list[str]] = {
 def _candidate_env_prefixes(node_name: str) -> list[str]:
     if node_name in _SUBMETRIC_ENV_KEYS:
         return _SUBMETRIC_ENV_KEYS[node_name]
-    suffixes = _PIPELINE_ENV_KEYS.get(node_name)
-    if suffixes:
-        return suffixes
+    spec = _NODES_BY_NAME.get(node_name)
+    if spec and spec.env_key_suffixes:
+        return list(spec.env_key_suffixes)
     return [node_name.upper().replace("-", "_").replace(" ", "_")]
 
 

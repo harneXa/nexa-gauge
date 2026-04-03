@@ -49,6 +49,9 @@ class _RelevancyResult(BaseModel):
 
 
 class RelevanceNode(BaseMetricNode):
+    """
+    Measures: “What fraction of extracted answer claims are relevant to the question?”
+    """
     node_name = "relevance"
     SYSTEM_PROMPT = "You are a relevancy judge."
     USER_PROMPT = (

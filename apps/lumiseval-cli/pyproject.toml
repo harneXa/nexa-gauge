@@ -1,7 +1,7 @@
 [project]
 name = "lumiseval-cli"
 version = "0.1.0"
-description = "Typer CLI for lumis-eval — eval, estimate, and batch commands"
+description = "Typer CLI for lumis-eval — run and estimate commands"
 requires-python = ">=3.10"
 dependencies = [
     "python-dotenv>=1.0.0",

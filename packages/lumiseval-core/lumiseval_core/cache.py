@@ -32,6 +32,7 @@ from lumiseval_core.types import (
     EvalReport,
     InputMetadata,
     MetricResult,
+    NodeCostBreakdown,
     Rubric,
 )
 
@@ -92,6 +93,23 @@ def _deserialize(node_output_raw: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _serialize_node_cost(node_cost: Optional[NodeCostBreakdown]) -> Optional[dict[str, Any]]:
+    """Convert optional NodeCostBreakdown to JSON-ready dict."""
+    if node_cost is None:
+        return None
+    return node_cost.model_dump()
+
+
+def _deserialize_node_cost(node_cost_raw: Any) -> Optional[NodeCostBreakdown]:
+    """Parse cached node cost metadata, returning None on invalid shapes."""
+    if node_cost_raw is None:
+        return None
+    try:
+        return NodeCostBreakdown.model_validate(node_cost_raw)
+    except Exception:
+        return None
+
+
 # ── Hash helpers ─────────────────────────────────────────────────────────────
 
 
@@ -129,6 +147,7 @@ def compute_config_hash(job_config: EvalJobConfig) -> str:
         f"|{job_config.enable_relevance}"
         f"|{job_config.enable_redteam}"
         f"|{job_config.enable_rubric}"
+        f"|{job_config.enable_reference}"
         f"|{job_config.web_search}"
         f"|{job_config.evidence_threshold}"
     )
@@ -158,19 +177,57 @@ class CacheStore:
         """Return True if a valid cache entry exists for this node."""
         return self._path(case_hash, config_hash, node_name).exists()
 
-    def get(self, case_hash: str, config_hash: str, node_name: str) -> Optional[dict[str, Any]]:
-        """Load and deserialise a cached node output.
+    def get_entry(self, case_hash: str, config_hash: str, node_name: str) -> Optional[dict[str, Any]]:
+        """Load and deserialise a full cache envelope for one node.
 
-        Returns None on a cache miss or if the file cannot be parsed.
+        Envelope shape (v2):
+          {
+            "node_name": str,
+            "case_hash": str,
+            "config_hash": str,
+            "created_at": str,
+            "node_output": {...},
+            "node_cost": {"model_calls": int, "cost_usd": float} | null,
+          }
+
+        Backward compatible with v1 envelopes that only contain ``node_output``.
         """
         p = self._path(case_hash, config_hash, node_name)
         if not p.exists():
             return None
         try:
             envelope = json.loads(p.read_text())
-            return _deserialize(envelope["node_output"])
+            if "node_output" not in envelope:
+                return None
+            return {
+                "node_name": envelope.get("node_name", node_name),
+                "case_hash": envelope.get("case_hash", case_hash),
+                "config_hash": envelope.get("config_hash", config_hash),
+                "created_at": envelope.get("created_at"),
+                "node_output": _deserialize(envelope["node_output"]),
+                "node_cost": _deserialize_node_cost(envelope.get("node_cost")),
+            }
         except Exception:
             return None
+
+    def get(self, case_hash: str, config_hash: str, node_name: str) -> Optional[dict[str, Any]]:
+        """Load and deserialise a cached node output.
+
+        Returns None on a cache miss or if the file cannot be parsed.
+        """
+        entry = self.get_entry(case_hash, config_hash, node_name)
+        if entry is None:
+            return None
+        return entry["node_output"]
+
+    def get_node_cost(
+        self, case_hash: str, config_hash: str, node_name: str
+    ) -> Optional[NodeCostBreakdown]:
+        """Load the cached per-node cost breakdown, if present."""
+        entry = self.get_entry(case_hash, config_hash, node_name)
+        if entry is None:
+            return None
+        return entry["node_cost"]
 
     def put(
         self,
@@ -178,8 +235,15 @@ class CacheStore:
         config_hash: str,
         node_name: str,
         node_output: dict[str, Any],
+        node_cost: Optional[NodeCostBreakdown] = None,
     ) -> None:
-        """Serialise and persist a node output dict."""
+        """Serialise and persist one node envelope.
+
+        Why include ``node_cost`` in the same envelope:
+          - keeps data and incremental cost provenance in one cache record
+          - lets preflight and diagnostics inspect prior spend assumptions
+            without recomputing historical metadata
+        """
         p = self._path(case_hash, config_hash, node_name)
         p.parent.mkdir(parents=True, exist_ok=True)
         envelope = {
@@ -188,6 +252,7 @@ class CacheStore:
             "config_hash": config_hash,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "node_output": _serialize(node_output),
+            "node_cost": _serialize_node_cost(node_cost),
         }
         p.write_text(json.dumps(envelope, indent=2))
 
@@ -206,6 +271,12 @@ class NoOpCacheStore(CacheStore):
         return False
 
     def get(self, *args: Any, **kwargs: Any) -> Optional[dict[str, Any]]:
+        return None
+
+    def get_entry(self, *args: Any, **kwargs: Any) -> Optional[dict[str, Any]]:
+        return None
+
+    def get_node_cost(self, *args: Any, **kwargs: Any) -> Optional[NodeCostBreakdown]:
         return None
 
     def put(self, *args: Any, **kwargs: Any) -> None:

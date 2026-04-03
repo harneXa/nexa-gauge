@@ -17,11 +17,15 @@ Usage::
 
 from __future__ import annotations
 
+from rich import box
+from rich.console import Console
+from rich.table import Table
+from rich.text import Text
 from dataclasses import dataclass
 from typing import Callable, Optional
 
 from lumiseval_core.constants import GENERATION_CHUNK_SIZE_TOKENS
-from lumiseval_core.pipeline import NODE_ORDER, NODE_PREREQUISITES
+from lumiseval_core.pipeline import METRIC_NODES, NODES_BY_NAME, NODE_ORDER
 from lumiseval_core.types import (
     ClaimCostMeta,
     CostEstimate,
@@ -32,11 +36,15 @@ from lumiseval_core.types import (
 
 from lumiseval_graph.llm.config import get_judge_model
 from lumiseval_graph.nodes.claim_extractor import ClaimExtractorNode
-from lumiseval_graph.nodes.metrics.reference import ReferenceMetricsNode
+from lumiseval_graph.nodes.metrics.dedupe import DedupeNode
 from lumiseval_graph.nodes.metrics.grounding import GroundingNode
 from lumiseval_graph.nodes.metrics.redteam import RedteamNode
+from lumiseval_graph.nodes.metrics.reference import ReferenceNode
 from lumiseval_graph.nodes.metrics.relevance import RelevanceNode
 from lumiseval_graph.nodes.metrics.rubric import RubricNode
+
+
+_METRIC_NODES = set(METRIC_NODES)
 
 # ── Output types ──────────────────────────────────────────────────────────────
 
@@ -63,9 +71,6 @@ class NodeCostRow:
         )
 
 
-_METRIC_NODES = {"claims", "grounding", "relevance", "redteam", "rubric"}
-
-
 @dataclass
 class CostReport:
     """Full pipeline cost report, one row per node in pipeline order."""
@@ -86,13 +91,26 @@ class CostReport:
         self,
         title: Optional[str] = "Pipeline Cost Estimate",
         total_records: int = 0,
+        highlight_nodes: Optional[set[str]] = None,
+        visible_nodes: Optional[set[str]] = None,
+        target_node: Optional[str] = None,
     ) -> None:
-        """Render the report as a pretty Rich table in the terminal."""
-        from rich import box
-        from rich.console import Console
-        from rich.table import Table
-        from rich.text import Text
+        """Render the report as a pretty Rich table in the terminal.
 
+        Args:
+            title: Table title.
+            total_records: Dataset size used for optional coverage column.
+            highlight_nodes: Optional set of node names to visually emphasize.
+                Typical usage is highlighting the strict target branch selected
+                by the CLI (for example, scan → chunk → claims → dedupe → grounding).
+            visible_nodes: Optional set of node names to render. When omitted,
+                all rows are shown in pipeline order.
+            target_node: Optional node name whose row should display the total
+                cumulative cost. When provided, non-target rows in the
+                ``Cost (USD)`` column show ``—``.
+        """
+        highlight_nodes = highlight_nodes or set()
+        visible_nodes = visible_nodes or set()
         table = Table(
             title=title,
             box=box.ROUNDED,
@@ -113,9 +131,13 @@ class CostReport:
         total_cost = self.row("eval").cost_usd
 
         for r in self.rows:
+            if visible_nodes and r.node_name not in visible_nodes:
+                continue
+
             is_zero = r.model_calls == 0
             is_eval = r.node_name == "eval"
             is_metric = r.node_name in _METRIC_NODES
+            is_highlighted = r.node_name in highlight_nodes
 
             if is_eval:
                 row_style = "bold"
@@ -144,8 +166,29 @@ class CostReport:
                 )
                 node_text = Text(r.node_name)
 
+            if is_highlighted:
+                # Gentle branch highlight: soft cyan accent, no hard background.
+                node_text = Text(f"> {r.node_name}", style="bold bright_cyan")
+                row_style = ""
+                cost_str = Text(str(cost_str), style="bright_cyan")
+                node_cost_str = Text(str(node_cost_str), style="cyan")
+
+            show_cumulative_cost = target_node is None or r.node_name == target_node
+            if show_cumulative_cost:
+                if target_node is not None:
+                    # Explicit target run view: show only the target's total.
+                    cost_str = Text(
+                        f"${r.cost_usd:.6f}",
+                        style="bright_cyan" if is_highlighted else ("bold green" if is_eval else "green"),
+                    )
+            else:
+                cost_str = Text("—", style="cyan" if is_highlighted else "dim")
+
             calls_text = Text(
-                str(r.model_calls) if r.model_calls else "—", style="dim" if is_zero else ""
+                str(r.model_calls) if r.model_calls else "—",
+                style=(
+                    "dim" if (is_zero and not is_highlighted) else ("cyan" if is_highlighted else "")
+                ),
             )
 
             row_cells: list = [node_text]
@@ -155,13 +198,18 @@ class CostReport:
                     cov_pct = r.eligible_records / total_records * 100
                     coverage_text = Text(
                         f"{r.eligible_records}/{total_records}  ({cov_pct:.0f}%)",
-                        style="dim" if is_zero else "",
+                        style=(
+                            "dim"
+                            if (is_zero and not is_highlighted)
+                            else ("cyan" if is_highlighted else "")
+                        ),
                     )
                 else:
-                    coverage_text = Text("—", style="dim")
+                    coverage_text = Text("—", style="cyan" if is_highlighted else "dim")
                 row_cells.append(coverage_text)
 
-            row_cells.extend([calls_text, node_cost_str, cost_str, r.source])
+            breakdown_cell = Text(r.source, style="cyan" if is_highlighted else "")
+            row_cells.extend([calls_text, node_cost_str, cost_str, breakdown_cell])
             table.add_row(*row_cells, style=row_style)
 
         Console().print(table)
@@ -172,16 +220,18 @@ class CostReport:
 # Maps node name → the class whose cost_estimate() to call.
 _COST_NODES: dict[str, type] = {
     "claims": ClaimExtractorNode,
+    "dedupe": DedupeNode,
     "grounding": GroundingNode,
     "relevance": RelevanceNode,
     "redteam": RedteamNode,
     "rubric": RubricNode,
-    "reference": ReferenceMetricsNode,
+    "reference": ReferenceNode,
 }
 
 # Determines whether a node is active given the job config.
 _NODE_ENABLED: dict[str, Callable[[EvalJobConfig], bool]] = {
     "claims": lambda c: c.enable_relevance or c.enable_grounding,
+    "dedupe": lambda c: c.enable_relevance or c.enable_grounding,
     "grounding": lambda c: c.enable_grounding,
     "relevance": lambda c: c.enable_relevance,
     "redteam": lambda c: c.enable_redteam,
@@ -245,6 +295,7 @@ class CostEstimator:
         if node_name == "claims":
             return self._build_claim_cost_meta(metadata)
         return {
+            "dedupe": metadata.cost_meta.grounding,
             "grounding": metadata.cost_meta.grounding,
             "relevance": metadata.cost_meta.relevance,
             "redteam": metadata.cost_meta.readteam,
@@ -283,7 +334,14 @@ class CostEstimator:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def estimate(self, metadata: InputMetadata) -> CostReport:
+    def estimate(
+        self,
+        metadata: InputMetadata,
+        *,
+        individual_overrides: Optional[dict[str, NodeCostBreakdown]] = None,
+        eligible_overrides: Optional[dict[str, int]] = None,
+        formula_overrides: Optional[dict[str, str]] = None,
+    ) -> CostReport:
         """Compute a cumulative cost report for all pipeline nodes.
 
         Each row's ``model_calls`` and ``cost_usd`` represent the *total* cost
@@ -293,24 +351,35 @@ class CostEstimator:
 
         Args:
             metadata: Output of the Metadata Scanner (must include cost_meta).
+            individual_overrides: Optional per-node isolated cost overrides.
+                Used by cache-aware preflight to price only uncached work.
+            eligible_overrides: Optional per-node eligible-record counts to
+                display alongside overridden costs.
+            formula_overrides: Optional per-node formula strings; keeps table
+                explanations aligned with overridden subsets.
 
         Returns:
             CostReport with one NodeCostRow per pipeline node in order.
         """
         # Step 1 — individual cost per node
-        individual: dict[str, NodeCostBreakdown] = {
-            node: self._estimate_node(node, metadata) for node in NODE_ORDER
-        }
+        individual: dict[str, NodeCostBreakdown] = {}
+        for node in NODE_ORDER:
+            override = individual_overrides.get(node) if individual_overrides else None
+            individual[node] = override if override is not None else self._estimate_node(node, metadata)
 
         # Step 2 — cumulative cost per node
         rows: list[NodeCostRow] = []
         for node in NODE_ORDER:
-            prereqs_and_self = list(NODE_PREREQUISITES[node]) + [node]
+            prereqs_and_self = list(NODES_BY_NAME[node].prerequisites) + [node]
             contributing = [n for n in prereqs_and_self if individual[n].model_calls > 0]
 
             parts = []
             for n in contributing:
-                formula = self._node_formula(n, metadata)
+                formula = (
+                    formula_overrides.get(n)
+                    if formula_overrides and n in formula_overrides
+                    else self._node_formula(n, metadata)
+                )
                 if n == node and formula:
                     indented = formula.replace("\n", "\n  ")
                     parts.append(f"{n}(\n  {indented}\n)")
@@ -324,7 +393,11 @@ class CostEstimator:
                     cost_usd=sum(individual[n].cost_usd for n in contributing),
                     source=" + ".join(parts) if parts else "—",
                     individual_cost_usd=individual[node].cost_usd,
-                    eligible_records=self._eligible_records(node, metadata),
+                    eligible_records=(
+                        eligible_overrides[node]
+                        if eligible_overrides is not None and node in eligible_overrides
+                        else self._eligible_records(node, metadata)
+                    ),
                 )
             )
 
@@ -340,7 +413,7 @@ def estimate(
     target_node: Optional[str] = None,
     rubric_rule_count: int = 0,
 ) -> CostEstimate:
-    """Module-level wrapper called by graph.node_cost_estimator.
+    """Module-level wrapper for callers that need a typed ``CostEstimate``.
 
     Delegates to CostEstimator and converts the CostReport to a CostEstimate
     so the result can be stored in EvalState and used by the eval node.
@@ -396,22 +469,3 @@ if __name__ == "__main__":
 
     report = CostEstimator(cfg).estimate(metadata)
     report.print_table()
-
-"""
-    claims + relevance[3 recs, 1 call/rec (all claims batched), 3 calls                   │
-        input_tokens  = 108 (prompt) + 13 (question) + 35 (2.3 claims × 15t) = 156 tok/call │
-        output_tokens = 23 (2.3 claims × 10t json_verdict) = 23 tok/call
-    ] 
-
-    This doesn't look nice to be displayed in the terminal. Can I have something more readable
-
-    claims + relevance(
-        number_rcords = 3 recs, 1 call/rec (all claims batched), 3 calls
-        input_tokens  = 108 (prompt tokens) + 13 (question tokens) + 35 (2.3 claims/record × 15 token/claim) = 156 tok/call
-        output_tokens = 23 (2.3 claims × 10 token_json_verdict) = 23 tok/call
-        total_tokens = 3 * (156 + 23)= 179 tok/call
-    )
-│            │        │                  │   input_tokens  = 108 (prompt) + 13 (question) + 35 (2.3 claims × 15t) = 156 tok/call │
-│            │        │                  │   output_tokens = 23 (2.3 claims × 10t json_verdict) = 23 tok/call] 
-
-"""

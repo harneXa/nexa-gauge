@@ -17,6 +17,7 @@ from lumiseval_core.constants import (
     DEFAULT_JUDGE_MODEL,
     DEFAULT_SPLIT,
     EVIDENCE_VERDICT_SUPPORTED_THRESHOLD,
+    GENERATION_CHUNK_SIZE_TOKENS,
     SCORE_WEIGHT_ANSWER_RELEVANCY,
     SCORE_WEIGHT_EVIDENCE_SUPPORT_RATE,
     SCORE_WEIGHT_FAITHFULNESS,
@@ -89,12 +90,14 @@ class EvidenceResult(BaseModel):
 
 
 class RecordMeta(BaseModel):
-    context_token_count: int
     generation_chunk_count: int
+    context_token_count: int
+    question_token_count: int
     generation_token_count: int
     rubric_token_count: int
     total_token_count: int
     estimated_claim_count: int
+    has_question: bool
     has_context: bool
     has_rubric: bool
     has_reference: bool = False
@@ -107,8 +110,8 @@ class Record(BaseModel):
     question: Optional[str]
     context: Optional[list[str]]
     generation: Optional[str]
-    generation_chunks: Optional[list[str]]
     rubric: Optional[list[str]]
+    generation_chunks: Optional[list[str]]
     record_metadata: RecordMeta
 
 
@@ -168,8 +171,9 @@ class CostMetadata(BaseModel):
 
 class InputMetadata(BaseModel):
     record_count: int
-    total_tokens: int  # generation_tokens + context_tokens + rubric_tokens
+    total_tokens: int  # question_tokens + generation_tokens + context_tokens + rubric_tokens
 
+    question_tokens: int = 0  # tokens across all question fields
     generation_tokens: int = 0  # tokens across all generation fields
     context_tokens: int = 0  # tokens across all context passages
     rubric_tokens: int = 0  # tokens across all rubric rule statements
@@ -263,6 +267,7 @@ class EvalJobConfig(BaseModel):
             "evidence_support_rate": SCORE_WEIGHT_EVIDENCE_SUPPORT_RATE,
         }
     )
+    chunk_size: int = GENERATION_CHUNK_SIZE_TOKENS
     budget_cap_usd: Optional[float] = None
 
 

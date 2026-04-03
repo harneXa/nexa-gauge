@@ -24,19 +24,16 @@ from lumiseval_core.constants import (
     TIKTOKEN_ENCODING,
 )
 from lumiseval_core.errors import InputParseError
-from lumiseval_core.pipeline import CONTEXT_REQUIRED_NODES as _CONTEXT_NODES
-from lumiseval_core.pipeline import REFERENCE_REQUIRED_NODES as _REFERENCE_NODES
-from lumiseval_core.pipeline import NODE_ORDER as _NODE_ORDER
-from lumiseval_core.pipeline import RUBRIC_REQUIRED_NODES as _RUBRIC_NODES
+from lumiseval_core.pipeline import NODES_BY_NAME as _NODES_BY_NAME
 from lumiseval_core.types import (
     CostMetadata,
     EvalCase,
-    ReferenceCostMeta,
     GorundingCostMeta,
     InputMetadata,
     Record,
     RecordMeta,
     RedTeamCostMeta,
+    ReferenceCostMeta,
     RelevanceCostMeta,
     RubricCostMeta,
 )
@@ -91,16 +88,22 @@ def _node_eligibility(
     *,
     has_generation: bool,
     has_context: bool,
+    has_question: bool,
     has_rubric: bool,
     has_reference: bool,
 ) -> dict[str, bool]:
-    flags = {node: has_generation for node in _NODE_ORDER}
-    for node in _CONTEXT_NODES:
-        flags[node] = has_generation and has_context
-    for node in _RUBRIC_NODES:
-        flags[node] = has_generation and has_rubric
-    for node in _REFERENCE_NODES:
-        flags[node] = has_generation and has_reference
+    flags = {}
+    for name, spec in _NODES_BY_NAME.items():
+        if spec.requires_context:
+            flags[name] = has_generation and has_context
+        elif spec.requires_question:
+            flags[name] = has_generation and has_question
+        elif spec.requires_rubric:
+            flags[name] = has_generation and has_rubric
+        elif spec.requires_reference:
+            flags[name] = has_generation and has_reference
+        else:
+            flags[name] = has_generation
     return flags
 
 
@@ -131,11 +134,13 @@ def _build_record(
     has_context = bool(context)
     has_rubric = bool(rubric)
     has_reference = bool(reference)
+    has_question =_is_nonempty_text(question or "")
     eligible_nodes = [
         node
         for node, ok in _node_eligibility(
             has_generation=_is_nonempty_text(generation or ""),
             has_context=has_context,
+            has_question=has_question,
             has_rubric=has_rubric,
             has_reference=has_reference,
         ).items()
@@ -155,11 +160,13 @@ def _build_record(
             generation_chunk_count=generation_chunk_count,
             generation_token_count=generation_token_count,
             rubric_token_count=rubric_token_count,
+            question_token_count=question_token_count,
             total_token_count=question_token_count
             + generation_token_count
             + context_token_count
             + rubric_token_count,
             estimated_claim_count=generation_chunk_count * CLAIMS_PER_CHUNK,
+            has_question=has_question,
             has_context=has_context,
             has_rubric=has_rubric,
             has_reference=has_reference,
@@ -197,9 +204,9 @@ class Scanner:
 
     def __init__(self) -> None:
         self._records: list[Record] = []
-        self._eligible_record_count: dict[str, int] = {node: 0 for node in _NODE_ORDER}
-        self._eligible_chunk_count: dict[str, int] = {node: 0 for node in _NODE_ORDER}
-        self._eligible_claim_count: dict[str, int] = {node: 0 for node in _NODE_ORDER}
+        self._eligible_record_count: dict[str, int] = {node: 0 for node in _NODES_BY_NAME}
+        self._eligible_chunk_count: dict[str, int] = {node: 0 for node in _NODES_BY_NAME}
+        self._eligible_claim_count: dict[str, int] = {node: 0 for node in _NODES_BY_NAME}
 
     # ── Per-record ingestion ──────────────────────────────────────────────────
 
@@ -214,6 +221,9 @@ class Scanner:
             rubric=[r.statement for r in case.rubric],
             reference=case.reference,
         )
+        from lumiseval_core.utils import pprint_model
+        print("\n")
+        pprint_model(record)
         self._add(record)
 
     def add_raw(self, idx: int, raw: dict[str, Any]) -> None:
@@ -310,17 +320,16 @@ class Scanner:
                                 "1889 World's Fair. Standing at 330 metres, it is one "
                                 'of the most recognisable structures in the world.'],
             'rubric': [],
-            'record_metadata': {'context_token_count': 84,
+            'record_metadata': {'question_token_count': 13,
+                                'context_token_count': 84,
                                 'generation_chunk_count': 1,
                                 'generation_token_count': 63,
                                 'rubric_token_count': 0,
-                                'total_token_count': 160,
+                                'total_token_count': 173,
                                 'estimated_claim_count': 1,
                                 'has_context': True,
                                 'has_rubric': False,
                                 'eligible_nodes': ['scan',
-                                                    'estimate',
-                                                    'approve',
                                                     'chunk',
                                                     'claims',
                                                     'dedupe',
@@ -335,6 +344,7 @@ class Scanner:
 
         # ── Token aggregates ──────────────────────────────────────────────────
         total_tokens = sum(m.total_token_count for m in metas)
+        question_tokens = sum(m.question_token_count for m in metas)
         generation_tokens = sum(m.generation_token_count for m in metas)
         context_tokens = sum(m.context_token_count for m in metas)
         rubric_tokens = sum(m.rubric_token_count for m in metas)
@@ -374,6 +384,7 @@ class Scanner:
         return InputMetadata(
             record_count=len(self._records),
             total_tokens=total_tokens,
+            question_tokens=question_tokens,
             generation_tokens=generation_tokens,
             context_tokens=context_tokens,
             rubric_tokens=rubric_tokens,

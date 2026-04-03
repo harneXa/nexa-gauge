@@ -1,25 +1,21 @@
-# Get Started with LumisEval (Run-Only CLI)
+# Get Started with LumisEval
 
-LumisEval now exposes one primary CLI workflow:
+LumisEval exposes two CLI interfaces:
 
 ```bash
-lumiseval run <node_name> --input <source> ...
+lumiseval estimate <target_node> --input <source> ...
+lumiseval run <target_node> --input <source> ...
 ```
 
-And one API endpoint:
-
-```http
-POST /jobs
-```
-
-`POST /jobs` accepts either a single record or an array of records.
+- `estimate` only scans/plans/prices.
+- `run` executes directly (no confirmation gate in graph).
 
 ## 1) Prerequisites
 
 - Python `>=3.10`
 - `uv`
-- `OPENAI_API_KEY` for judge/model-powered nodes
-- Optional: `TAVILY_API_KEY` when using `--web-search`
+- `OPENAI_API_KEY`
+- Optional: `TAVILY_API_KEY` when using web search
 
 ## 2) Setup
 
@@ -37,261 +33,251 @@ LLM_MODEL=gpt-4o-mini
 WEB_SEARCH_ENABLED=false
 ```
 
-If Hugging Face adapter is missing:
+If Hugging Face adapter support is missing:
 
 ```bash
 uv add datasets
 ```
 
-## 3) CLI Contract
+## 3) Nodes and Topology
 
-### 3.1 Command shape
+Canonical target nodes:
 
-```bash
-uv run lumiseval run <node_name> --input <source> [options]
-```
+- `scan`
+- `chunk`
+- `claims`
+- `dedupe`
+- `relevance`
+- `grounding`
+- `redteam`
+- `rubric`
+- `reference`
+- `eval`
 
-Where:
-- `<source>` is either:
-  - local path (`.json`, `.jsonl`, `.csv`, `.txt`)
-  - `hf://<dataset-id>`
-- `<node_name>` is one of:
-  - `scan`
-  - `estimate`
-  - `approve`
-  - `chunk`
-  - `claims`
-  - `dedupe`
-  - `relevance`
-  - `grounding`
-  - `redteam`
-  - `rubric`
-  - `eval`
+Strict prerequisite paths:
 
-### 3.2 Strict target semantics
-
-`run <node_name>` executes prerequisites and stops at that target node.
-Preflight cost estimation is target-aware, so it only estimates the branch required for that target.
+- `chunk <- scan`
+- `claims <- scan, chunk`
+- `dedupe <- scan, chunk, claims`
+- `relevance <- scan, chunk, claims, dedupe`
+- `grounding <- scan, chunk, claims, dedupe`
+- `redteam <- scan`
+- `rubric <- scan`
+- `reference <- scan`
+- `eval <- scan + all branches`
 
 Examples:
-- `run estimate` stops at `estimate`
-- `run claims` stops at `claims`
-- `run eval` runs the full required path to final eval
 
-### 3.3 Two-stage execution model
+- `lumiseval run redteam ...` runs `scan -> redteam`
+- `lumiseval run relevance ...` runs `scan -> chunk -> claims -> dedupe -> relevance`
+- `lumiseval run eval ...` runs full graph branch set
 
-Every CLI run does:
+## 4) Input Records
 
-1. Dataset preflight (for selected cases):
-- scan records
-- print scan statistics table
-- estimate total cost
-- prompt for confirmation (unless `--yes`)
+Minimal valid record:
 
-2. Per-case node execution:
-- run each record up to target node
-- reuse cache by default
-- print executed/cached counts per case
-
-## 4) Examples
-
-### 4.1 Run to `estimate` on local file
-
-```bash
-uv run lumiseval run estimate \
-  --input sample.json \
-  --limit 10 \
-  --yes
+```json
+{
+  "generation": "The Eiffel Tower is in Paris."
+}
 ```
 
-### 4.2 Run to `eval` on local file
+Recommended full record:
+
+```json
+{
+  "case_id": "eiffel-1",
+  "question": "Where is the Eiffel Tower?",
+  "generation": "The Eiffel Tower is in Paris, France.",
+  "context": ["The Eiffel Tower is a wrought-iron tower in Paris."],
+  "reference": "The Eiffel Tower is located in Paris.",
+  "rubric": [
+    {
+      "id": "R-1",
+      "statement": "Mentions location",
+      "pass_condition": "Must mention Paris"
+    }
+  ]
+}
+```
+
+Eligibility by field:
+
+- `generation` required for all nodes
+- `context` required for: `chunk`, `claims`, `dedupe`, `relevance`, `grounding`
+- `rubric` required for: `rubric`
+- `reference` required for: `reference`
+
+## 5) CLI Usage
+
+### 5.1 Estimate only
+
+```bash
+uv run lumiseval estimate grounding \
+  --input sample.json \
+  --limit 10
+```
+
+Output includes:
+
+- scan statistics table
+- node eligibility table
+- execution plan table (`to_run` / `cached` / `skipped`)
+- uncached delta cost table for the selected branch
+
+### 5.2 Execute branch
+
+```bash
+uv run lumiseval run grounding \
+  --input sample.json \
+  --limit 10
+```
+
+Behavior:
+
+- directly executes the selected branch
+- no estimate/approval prompt
+- uses cache unless `--force` or `--no-cache`
+
+`--yes` is accepted but deprecated on `run` (no-op).
+
+### 5.3 Full eval run
 
 ```bash
 uv run lumiseval run eval \
   --input sample.json \
   --limit 10 \
-  --yes \
   --output-dir ./runs/eval
 ```
 
-### 4.3 Run to a node on Hugging Face dataset
+For `eval` runs, `report.cost_estimate` is still populated by runner-level pre-eval estimation.
+
+### 5.4 Hugging Face dataset source
 
 ```bash
-uv run lumiseval run relevance \
+uv run lumiseval estimate relevance \
   --input hf://openai/gsm8k \
   --adapter huggingface \
   --hf-config main \
   --split train \
-  --limit 10 \
-  --yes
+  --limit 20
 ```
 
-## 5) Input Fields
+## 6) Important CLI Options
 
-### 5.1 Canonical record (`EvalCase`)
-
-Required:
-- `generation`
-
-Optional:
-- `case_id`
-- `question`
-- `reference`
-- `context`
-- `reference_files`
-- `rubric`
-- additional metadata fields
-
-### 5.2 Local adapter aliases
-
-- Generation: `generation | response | answer | output | completion`
-- Case id: `case_id | id | uuid | prompt_id`
-- Question: `question | query | prompt`
-- Ground truth: `reference | reference | gold_answer`
-- Context: `context | contexts | documents`
-- Reference files: `reference_files | reference_paths`
-- Rubric rules: `rubric | rubric`
-
-### 5.3 Hugging Face adapter aliases
-
-- Generation: `generation | response | answer | output | completion`
-- Case id: `case_id | id | prompt_id`
-- Question: `question | query | prompt`
-- Reference: `reference | reference`
-- Context: `context | contexts | documents`
-- Reference files: `reference_files | reference_paths`
-- Rubric rules: `rubric | rubric`
-
-## 6) Cache Behavior
-
-Cache is enabled by default.
-
-Controls:
-- `--no-cache`: disable cache reads/writes
-- `--force`: ignore cache reads but still write outputs
-- `--cache-dir`: custom cache location
-
-Case hash includes:
-- `generation`
-- `question`
-- `reference`
-- `rubric` (`id`, `statement`, `pass_condition`)
-- `reference_files`
-
-Config hash includes:
-- `judge_model`
-- `enable_grounding`
-- `enable_relevance`
-- `enable_redteam`
-- `enable_rubric`
-- `web_search`
-- `evidence_threshold`
-
-This enables incremental behavior:
-- unchanged cases hit cache
-- new/changed cases execute
-
-## 7) Important CLI Options
-
-- Source / selection:
+- source selection:
   - `--input`
   - `--split`
   - `--limit`
   - `--adapter`
   - `--hf-config`
   - `--hf-revision`
-- Model / retrieval:
+- model/runtime:
   - `--model`
   - `--web-search`
   - `--evidence-threshold`
-- Metric toggles:
-  - `--enable-hallucination/--disable-hallucination` (grounding node)
-  - `--enable-answer-relevancy/--disable-answer-relevancy` (relevance node)
-  - `--enable-adversarial/--disable-adversarial` (redteam node)
-  - `--enable-rubric/--disable-rubric` (rubric node)
-- Control:
-  - `--yes`
-  - `--continue-on-error/--fail-fast`
+- execution controls:
+  - `--continue-on-error/--fail-fast` (`run` only)
   - `--force`
   - `--no-cache`
   - `--cache-dir`
-  - `--output-dir` (eval output JSONs)
+  - `--output-dir` (`run eval` only)
 
-## 8) API Usage
+## 7) Cache Semantics
 
-### 8.1 Start API
+Cache is node-level and keyed by:
 
-```bash
-uv run uvicorn lumiseval_api.main:app --reload --port 8080
-```
+- case hash: content fields (`generation`, `question`, `reference`, `context`, `rubric`, `reference_files`)
+- config hash: execution config (`judge_model`, enable flags, web/evidence settings)
 
-### 8.2 Single-record request
+Implications:
 
-```bash
-curl -X POST "http://localhost:8080/jobs" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "generation": "The Eiffel Tower is in Paris, France.",
-    "question": "Where is the Eiffel Tower?",
-    "reference": "The Eiffel Tower is a wrought-iron lattice tower in Paris.",
+- rerunning same target on unchanged data reuses cached nodes
+- extending from one branch to another reuses shared prerequisites
+- adding new rows only computes uncached rows
+
+`estimate` reflects **delta cost** (uncached work only).
+
+## 8) API Contract (Design, Handlers Later)
+
+Planned endpoints:
+
+- `POST /estimate`
+- `POST /run`
+
+Shared request shape:
+
+```json
+{
+  "target_node": "grounding",
+  "cases": [
+    {
+      "case_id": "eiffel-1",
+      "question": "Where is the Eiffel Tower?",
+      "generation": "The Eiffel Tower is in Paris, France.",
+      "context": ["The Eiffel Tower is in Paris."],
+      "reference": "The Eiffel Tower is located in Paris.",
+      "rubric": []
+    }
+  ],
+  "job_config": {
     "judge_model": "gpt-4o-mini",
     "web_search": false,
+    "evidence_threshold": 0.75,
     "enable_grounding": true,
-    "enable_relevance": true
-  }'
+    "enable_relevance": true,
+    "enable_redteam": true,
+    "enable_rubric": true,
+    "enable_reference": true
+  },
+  "force": false
+}
 ```
 
-### 8.3 Multi-record request (JSON array)
+Planned `/estimate` response shape:
 
-```bash
-curl -X POST "http://localhost:8080/jobs" \
-  -H "Content-Type: application/json" \
-  -d '[
+```json
+{
+  "target_node": "grounding",
+  "scan": { "record_count": 10, "total_tokens": 12345 },
+  "plan": {
+    "planned_nodes": ["scan", "chunk", "claims", "dedupe", "grounding"],
+    "to_run_case_ids_by_node": {},
+    "cached_case_ids_by_node": {},
+    "skipped_case_ids_by_node": {}
+  },
+  "cost": {
+    "rows": [],
+    "target_delta_cost_usd": 0.1234
+  }
+}
+```
+
+Planned `/run` response shape:
+
+```json
+{
+  "target_node": "grounding",
+  "results": [
     {
-      "generation": "The Eiffel Tower is in Paris, France.",
-      "question": "Where is the Eiffel Tower?",
-      "reference": "The Eiffel Tower is a wrought-iron lattice tower in Paris.",
-      "judge_model": "gpt-4o-mini",
-      "web_search": false
-    },
-    {
-      "generation": "Photosynthesis converts light into chemical energy.",
-      "question": "How does photosynthesis work?",
-      "judge_model": "gpt-4o-mini",
-      "web_search": false
+      "case_id": "eiffel-1",
+      "executed_nodes": ["scan", "chunk", "claims", "dedupe", "grounding"],
+      "cached_nodes": [],
+      "output": {}
     }
-  ]'
+  ]
+}
 ```
 
-### 8.4 API request fields
-
-Required:
-- `generation: str`
-
-Optional:
-- `question: str | null`
-- `reference: str | null`
-- `rubric: Rubric[]`
-- `reference_files: list[str]`
-- `judge_model: str`
-- `web_search: bool`
-- `enable_grounding: bool`
-- `enable_relevance: bool`
-- `enable_redteam: bool`
-- `enable_rubric: bool`
-- `evidence_threshold: float`
-- `budget_cap_usd: float | null`
-- `acknowledge_cost: bool` (accepted; not enforced)
+For `target_node=eval`, each result includes `report` with `cost_estimate`.
 
 ## 9) Troubleshooting
 
-- `Invalid dataset source ...`
-  - check path, adapter, or `hf://` format
 - `Unknown node ...`
-  - use one of supported node names (including `eval`)
-- Hugging Face import error
-  - run `uv add datasets`
-- API key errors
+  - use one of the canonical nodes listed above
+- `Invalid dataset source ...`
+  - verify local path or `hf://<dataset-id>` format
+- no HF adapter
+  - install `datasets`
+- model key errors
   - set `OPENAI_API_KEY`
-- No Tavily fallback
-  - set `TAVILY_API_KEY` or disable `--web-search`

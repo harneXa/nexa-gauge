@@ -20,21 +20,22 @@ from typing import Any
 
 from lumiseval_core.cache import CacheStore, compute_case_hash, compute_config_hash
 from lumiseval_core.pipeline import (
-    CONTEXT_REQUIRED_NODES,
     METRIC_NODES,
-    NODE_PREREQUISITES,
-    RUBRIC_REQUIRED_NODES,
-    SKIP_OUTPUTS,
-    normalize_node_name,
+    NODES_BY_NAME,
+    NODE_ORDER,
 )
-from lumiseval_core.types import EvalCase, EvalJobConfig
+from lumiseval_core.types import EvalCase, EvalJobConfig, NodeCostBreakdown
 from pydantic import BaseModel
 
 from lumiseval_graph import graph as graph_module
+from lumiseval_graph.nodes.cost_estimator import CostEstimator
+from lumiseval_graph.nodes.cost_estimator import estimate as build_cost_estimate
 from lumiseval_graph.registry import NODE_FNS
 
 
 class NodeRunResult(BaseModel):
+    """Result payload for non-cached single-case execution."""
+
     node_name: str
     executed_nodes: list[str]
     node_output: dict[str, Any]
@@ -42,6 +43,8 @@ class NodeRunResult(BaseModel):
 
 
 class CachedNodeRunResult(BaseModel):
+    """Result payload for cache-aware single-case execution."""
+
     node_name: str
     case_id: str
     executed_nodes: list[str]
@@ -51,17 +54,68 @@ class CachedNodeRunResult(BaseModel):
     elapsed_ms: float
 
 
+class CaseNodePlan(BaseModel):
+    """Per-case execution planning result for a specific target node.
+
+    This structure is computed without executing node functions and captures:
+      - the strict prerequisite path
+      - which nodes will run vs be loaded from cache vs be skipped by eligibility
+      - stable hashes used for cache lookup
+    """
+
+    target_node: str
+    case_index: int
+    case_id: str
+    case_hash: str
+    config_hash: str
+    planned_nodes: list[str]
+    to_run_nodes: list[str]
+    cached_nodes: list[str]
+    skipped_nodes: list[str]
+    node_status: dict[str, str]
+
+
+class DatasetNodePlan(BaseModel):
+    """Aggregated execution plan across a dataset for one target node.
+
+    Node-level maps are keyed by canonical node name and list either case ids
+    or case indices so callers can produce UX summaries and delta estimates
+    without re-running planning logic.
+    """
+
+    target_node: str
+    planned_nodes: list[str]
+    case_plans: list[CaseNodePlan]
+    to_run_case_ids_by_node: dict[str, list[str]]
+    cached_case_ids_by_node: dict[str, list[str]]
+    skipped_case_ids_by_node: dict[str, list[str]]
+    to_run_case_indices_by_node: dict[str, list[int]]
+    cached_case_indices_by_node: dict[str, list[int]]
+    skipped_case_indices_by_node: dict[str, list[int]]
+
+    def to_run_count(self, node_name: str) -> int:
+        """Return how many cases require fresh compute for `node_name`."""
+        return len(self.to_run_case_ids_by_node.get(node_name, []))
+
+    def cached_count(self, node_name: str) -> int:
+        """Return how many cases can reuse cached output for `node_name`."""
+        return len(self.cached_case_ids_by_node.get(node_name, []))
+
+    def skipped_count(self, node_name: str) -> int:
+        """Return how many cases are ineligible and therefore skipped."""
+        return len(self.skipped_case_ids_by_node.get(node_name, []))
+
+
 class NodeRunner:
     """Execute a single node for a case, optionally running required prior nodes."""
 
     @staticmethod
-    def normalize_node_name(node_name: str) -> str:
-        """Map legacy node names to canonical one-word names."""
-        return normalize_node_name(node_name)
-
-    @staticmethod
     def _has_generation(case: EvalCase) -> bool:
         return bool(case.generation and case.generation.strip())
+
+    @staticmethod
+    def _has_question(case: EvalCase) -> bool:
+        return bool(case.question and case.question.strip())
 
     @staticmethod
     def _has_context(case: EvalCase) -> bool:
@@ -74,19 +128,39 @@ class NodeRunner:
     def _has_rubric(case: EvalCase) -> bool:
         return len(case.rubric or []) > 0
 
+    @staticmethod
+    def _has_reference(case: EvalCase) -> bool:
+        """True when a non-empty reference answer exists on the case."""
+        return bool(case.reference and case.reference.strip())
+
     @classmethod
     def is_case_eligible_for_node(cls, case: EvalCase, node_name: str) -> bool:
+        """Apply field-based eligibility gates used by both planning and execution.
+
+        Why centralize this:
+          - planners and runners must agree or preflight cost/execution diverges
+          - all route gating (context/rubric/reference) stays in one location
+        """
         if not cls._has_generation(case):
             return False
-        if node_name in CONTEXT_REQUIRED_NODES:
+        spec = NODES_BY_NAME.get(node_name)
+        if spec is None:
+            return True
+        if spec.requires_question:
+            return cls._has_question(case)
+        if spec.requires_context:
             return cls._has_context(case)
-        if node_name in RUBRIC_REQUIRED_NODES:
+        if spec.requires_rubric:
             return cls._has_rubric(case)
+        if spec.requires_reference:
+            return cls._has_reference(case)
         return True
 
     @classmethod
     def skipped_output_for_node(cls, node_name: str) -> dict[str, Any]:
-        return dict(SKIP_OUTPUTS.get(node_name, {}))
+        """Return the canonical no-op state patch for an ineligible node."""
+        spec = NODES_BY_NAME.get(node_name)
+        return dict(spec.skip_output) if spec else {}
 
     def run_case(
         self,
@@ -96,7 +170,6 @@ class NodeRunner:
         job_config: EvalJobConfig | None = None,
         include_prerequisites: bool = True,
     ) -> NodeRunResult:
-        node_name = self.normalize_node_name(node_name)
         if node_name not in NODE_FNS:
             valid = ", ".join(sorted(NODE_FNS))
             raise ValueError(f"Unknown node '{node_name}'. Valid options: {valid}.")
@@ -112,7 +185,7 @@ class NodeRunner:
             reference_files=case.reference_files,
         )
 
-        plan = list(NODE_PREREQUISITES[node_name]) if include_prerequisites else []
+        plan = list(NODES_BY_NAME[node_name].prerequisites) if include_prerequisites else []
         plan.append(node_name)
 
         node_output: dict[str, Any] = {}
@@ -139,7 +212,167 @@ class CachedNodeRunner:
     """Execute a pipeline node for a case, loading any upstream results from cache."""
 
     def __init__(self, cache_store: CacheStore) -> None:
+        """Create a cache-aware runner with a filesystem or no-op cache backend."""
         self._cache = cache_store
+
+    @staticmethod
+    def _compute_hashes(case: EvalCase, job_config: EvalJobConfig) -> tuple[str, str]:
+        """Compute stable content/config hashes used as cache keys."""
+        case_hash = compute_case_hash(
+            generation=case.generation,
+            question=case.question,
+            reference=case.reference,
+            rubric=case.rubric or [],
+            context=case.context or [],
+            reference_files=case.reference_files or [],
+        )
+        config_hash = compute_config_hash(job_config)
+        return case_hash, config_hash
+
+    @staticmethod
+    def _plan_nodes(node_name: str) -> list[str]:
+        """Return strict prerequisite chain plus target node."""
+        return list(NODES_BY_NAME[node_name].prerequisites) + [node_name]
+
+    @staticmethod
+    def _estimate_step_cost(
+        estimator: CostEstimator,
+        step: str,
+        state: dict[str, Any],
+    ) -> NodeCostBreakdown:
+        """Compute isolated node cost from current state metadata.
+
+        Metadata is only available after scan runs; pre-scan nodes therefore
+        receive a zero-cost placeholder.
+        """
+        metadata = state.get("metadata")
+        if metadata is None:
+            return NodeCostBreakdown(model_calls=0, cost_usd=0.0)
+        return estimator._estimate_node(step, metadata)
+
+    def plan_case(
+        self,
+        *,
+        case: EvalCase,
+        case_index: int = -1,
+        node_name: str,
+        job_config: EvalJobConfig | None = None,
+        force: bool = False,
+    ) -> CaseNodePlan:
+        """Plan one case without executing any node function.
+
+        The method checks node eligibility and cache presence for each step in
+        the strict path to `node_name`. The output is later reused for:
+          - preflight UX tables
+          - delta cost estimation
+          - debugging what work is expected to run
+        """
+        if node_name not in NODE_FNS:
+            valid = ", ".join(sorted(NODE_FNS))
+            raise ValueError(f"Unknown node '{node_name}'. Valid options: {valid}.")
+
+        state = graph_module.build_initial_state(
+            generation=case.generation,
+            job_config=job_config,
+            question=case.question,
+            reference=case.reference,
+            context=case.context,
+            target_node=node_name,
+            rubric=case.rubric,
+            reference_files=case.reference_files,
+        )
+        case_hash, config_hash = self._compute_hashes(case, state["job_config"])
+        planned_nodes = self._plan_nodes(node_name)
+
+        to_run_nodes: list[str] = []
+        cached_nodes: list[str] = []
+        skipped_nodes: list[str] = []
+        node_status: dict[str, str] = {}
+
+        for step in planned_nodes:
+            if not NodeRunner.is_case_eligible_for_node(case, step):
+                skipped_nodes.append(step)
+                node_status[step] = "skipped"
+                continue
+            if not force and self._cache.get_entry(case_hash, config_hash, step) is not None:
+                cached_nodes.append(step)
+                node_status[step] = "cached"
+                continue
+            to_run_nodes.append(step)
+            node_status[step] = "to_run"
+
+        return CaseNodePlan(
+            target_node=node_name,
+            case_index=case_index,
+            case_id=case.case_id,
+            case_hash=case_hash,
+            config_hash=config_hash,
+            planned_nodes=planned_nodes,
+            to_run_nodes=to_run_nodes,
+            cached_nodes=cached_nodes,
+            skipped_nodes=skipped_nodes,
+            node_status=node_status,
+        )
+
+    def plan_dataset(
+        self,
+        *,
+        cases: list[EvalCase],
+        node_name: str,
+        job_config: EvalJobConfig | None = None,
+        force: bool = False,
+    ) -> DatasetNodePlan:
+        """Plan an entire dataset run for a target node.
+
+        Aggregates `plan_case` outputs into per-node maps so callers can quickly
+        answer:
+          - how many cases will run per node
+          - how many are cache hits
+          - how many are skipped by eligibility
+        """
+        if node_name not in NODE_FNS:
+            valid = ", ".join(sorted(NODE_FNS))
+            raise ValueError(f"Unknown node '{node_name}'. Valid options: {valid}.")
+
+        planned_nodes = self._plan_nodes(node_name)
+        to_run_case_ids_by_node: dict[str, list[str]] = {n: [] for n in NODE_ORDER}
+        cached_case_ids_by_node: dict[str, list[str]] = {n: [] for n in NODE_ORDER}
+        skipped_case_ids_by_node: dict[str, list[str]] = {n: [] for n in NODE_ORDER}
+        to_run_case_indices_by_node: dict[str, list[int]] = {n: [] for n in NODE_ORDER}
+        cached_case_indices_by_node: dict[str, list[int]] = {n: [] for n in NODE_ORDER}
+        skipped_case_indices_by_node: dict[str, list[int]] = {n: [] for n in NODE_ORDER}
+
+        case_plans: list[CaseNodePlan] = []
+        for i, case in enumerate(cases):
+            plan = self.plan_case(
+                case=case,
+                case_index=i,
+                node_name=node_name,
+                job_config=job_config,
+                force=force,
+            )
+            case_plans.append(plan)
+            for step in plan.to_run_nodes:
+                to_run_case_ids_by_node[step].append(plan.case_id)
+                to_run_case_indices_by_node[step].append(plan.case_index)
+            for step in plan.cached_nodes:
+                cached_case_ids_by_node[step].append(plan.case_id)
+                cached_case_indices_by_node[step].append(plan.case_index)
+            for step in plan.skipped_nodes:
+                skipped_case_ids_by_node[step].append(plan.case_id)
+                skipped_case_indices_by_node[step].append(plan.case_index)
+
+        return DatasetNodePlan(
+            target_node=node_name,
+            planned_nodes=planned_nodes,
+            case_plans=case_plans,
+            to_run_case_ids_by_node=to_run_case_ids_by_node,
+            cached_case_ids_by_node=cached_case_ids_by_node,
+            skipped_case_ids_by_node=skipped_case_ids_by_node,
+            to_run_case_indices_by_node=to_run_case_indices_by_node,
+            cached_case_indices_by_node=cached_case_indices_by_node,
+            skipped_case_indices_by_node=skipped_case_indices_by_node,
+        )
 
     def run_case(
         self,
@@ -149,19 +382,15 @@ class CachedNodeRunner:
         job_config: EvalJobConfig | None = None,
         force: bool = False,
     ) -> CachedNodeRunResult:
-        """Run *node_name* for *case*, using the cache for already-computed steps.
+        """Execute one case to `node_name` with cache reuse and per-node cache writes.
 
-        # Note: This function runs for each record
-        Args:
-            case: The evaluation case to run.
-            node_name: Target node name (must be in NodeRunner._node_fns).
-            job_config: Evaluation config; a default is created if not provided.
-            force: If True, skip cache reads (still writes new outputs to cache).
-
-        Returns:
-            CachedNodeRunResult with lists of executed vs cached nodes.
+        Behavior:
+          - Reads cached outputs when available (unless `force=True`).
+          - Writes outputs for executed *and skipped* nodes so future runs can
+            short-circuit consistently.
+          - Persists `node_cost` metadata alongside each cached node output.
+          - For `eval` target, executes metric nodes in parallel when possible.
         """
-        node_name = NodeRunner.normalize_node_name(node_name)
         if node_name not in NODE_FNS:
             valid = ", ".join(sorted(NODE_FNS))
             raise ValueError(f"Unknown node '{node_name}'. Valid options: {valid}.")
@@ -179,28 +408,30 @@ class CachedNodeRunner:
             reference_files=case.reference_files,
         )
 
-        # Compute an HashID for Caching
-        case_hash = compute_case_hash(
-            generation=case.generation,
-            question=case.question,
-            reference=case.reference,
-            rubric=case.rubric or [],
-            context=case.context or [],
-            reference_files=case.reference_files or [],
-        )
-        config_hash = compute_config_hash(state["job_config"])
-
-        plan: list[str] = list(NODE_PREREQUISITES[node_name]) + [node_name]
+        case_hash, config_hash = self._compute_hashes(case, state["job_config"])
+        plan = self._plan_nodes(node_name)
         executed: list[str] = []
         cached: list[str] = []
         node_output: dict[str, Any] = {}
         metric_group = METRIC_NODES
+        estimator = CostEstimator(state["job_config"])
 
         # A plan may look like below
-        # plan:  ['scan', 'estimate']
+        # plan: ['scan', 'chunk', 'claims', 'dedupe', 'relevance']
         i = 0
         while i < len(plan):
             step = plan[i]
+
+            # `cost_estimate` is no longer a graph node. For eval runs we inject
+            # it here once scan metadata is available so `eval.aggregate(...)`
+            # can keep including report.cost_estimate.
+            if node_name == "eval" and step == "eval" and state.get("cost_estimate") is None:
+                metadata = state.get("metadata")
+                if metadata is not None:
+                    state["cost_estimate"] = build_cost_estimate(
+                        metadata,
+                        state["job_config"],
+                    )
 
             # For eval target, metric nodes are independent and can run in parallel.
             if node_name == "eval" and step == "relevance":
@@ -212,12 +443,18 @@ class CachedNodeRunner:
                     if not NodeRunner.is_case_eligible_for_node(case, metric_step):
                         output = NodeRunner.skipped_output_for_node(metric_step)
                         skipped_group_outputs[metric_step] = output
-                        self._cache.put(case_hash, config_hash, metric_step, output)
+                        self._cache.put(
+                            case_hash,
+                            config_hash,
+                            metric_step,
+                            output,
+                            node_cost=NodeCostBreakdown(model_calls=0, cost_usd=0.0),
+                        )
                         continue
-                    if not force and self._cache.has(case_hash, config_hash, metric_step):
-                        cached_output = self._cache.get(case_hash, config_hash, metric_step)
-                        if cached_output is not None:
-                            cached_group_outputs[metric_step] = cached_output
+                    if not force:
+                        cached_entry = self._cache.get_entry(case_hash, config_hash, metric_step)
+                        if cached_entry is not None:
+                            cached_group_outputs[metric_step] = cached_entry["node_output"]
                             cached.append(metric_step)
                             continue
                     to_run.append(metric_step)
@@ -231,7 +468,13 @@ class CachedNodeRunner:
                             output = future.result()
                             run_group_outputs[metric_step] = output
                             executed.append(metric_step)
-                            self._cache.put(case_hash, config_hash, metric_step, output)
+                            self._cache.put(
+                                case_hash,
+                                config_hash,
+                                metric_step,
+                                output,
+                                node_cost=self._estimate_step_cost(estimator, metric_step, state),
+                            )
 
                 # Merge outputs in stable node order.
                 for metric_step in metric_group:
@@ -249,15 +492,22 @@ class CachedNodeRunner:
             if not NodeRunner.is_case_eligible_for_node(case, step):
                 output = NodeRunner.skipped_output_for_node(step)
                 state.update(output)
-                self._cache.put(case_hash, config_hash, step, output)
+                self._cache.put(
+                    case_hash,
+                    config_hash,
+                    step,
+                    output,
+                    node_cost=NodeCostBreakdown(model_calls=0, cost_usd=0.0),
+                )
                 if step == node_name:
                     node_output = output
                 i += 1
                 continue
 
-            if not force and self._cache.has(case_hash, config_hash, step):
-                cached_output = self._cache.get(case_hash, config_hash, step)
-                if cached_output is not None:
+            if not force:
+                cached_entry = self._cache.get_entry(case_hash, config_hash, step)
+                if cached_entry is not None:
+                    cached_output = cached_entry["node_output"]
                     state.update(cached_output)
                     cached.append(step)
                     if step == node_name:
@@ -267,7 +517,13 @@ class CachedNodeRunner:
 
             output = NODE_FNS[step](state)
             state.update(output)
-            self._cache.put(case_hash, config_hash, step, output)
+            self._cache.put(
+                case_hash,
+                config_hash,
+                step,
+                output,
+                node_cost=self._estimate_step_cost(estimator, step, state),
+            )
             executed.append(step)
             if step == node_name:
                 node_output = output

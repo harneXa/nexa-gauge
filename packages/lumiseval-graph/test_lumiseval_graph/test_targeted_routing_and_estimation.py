@@ -1,14 +1,18 @@
-from lumiseval_core.pipeline import NODE_PREREQUISITES
+from lumiseval_core.cache import CacheStore
+from lumiseval_core.pipeline import NODES_BY_NAME, NODE_ORDER
 from lumiseval_core.types import (
     CostMetadata,
+    EvalCase,
     EvalJobConfig,
     GorundingCostMeta,
     InputMetadata,
+    NodeCostBreakdown,
     RedTeamCostMeta,
+    ReferenceCostMeta,
     RelevanceCostMeta,
     RubricCostMeta,
 )
-from lumiseval_graph.node_runner import NodeRunner
+from lumiseval_graph.node_runner import CachedNodeRunner, NodeRunner
 from lumiseval_graph.nodes.cost_estimator import CostEstimator
 
 
@@ -38,6 +42,7 @@ def _cost_meta(
             unique_rule_tokens=0.0,
         ),
         readteam=RedTeamCostMeta(eligible_records=redteam_eligible),
+        reference=ReferenceCostMeta(eligible_records=0),
     )
 
 
@@ -51,13 +56,26 @@ def _meta(generation_chunk_count: int = 20) -> InputMetadata:
 
 
 def test_redteam_and_rubric_do_not_depend_on_claims_branch() -> None:
-    redteam_plan = NODE_PREREQUISITES["redteam"]
-    rubric_plan = NODE_PREREQUISITES["rubric"]
+    redteam_plan = list(NODES_BY_NAME["redteam"].prerequisites)
+    rubric_plan = list(NODES_BY_NAME["rubric"].prerequisites)
 
     for plan in (redteam_plan, rubric_plan):
         assert "chunk" not in plan
         assert "claims" not in plan
         assert "dedupe" not in plan
+
+
+def test_topology_no_longer_includes_estimate_or_approve_nodes() -> None:
+    assert "estimate" not in NODE_ORDER
+    assert "approve" not in NODE_ORDER
+    assert list(NODES_BY_NAME["chunk"].prerequisites) == ["scan"]
+    assert list(NODES_BY_NAME["claims"].prerequisites) == ["scan", "chunk"]
+    assert list(NODES_BY_NAME["dedupe"].prerequisites) == ["scan", "chunk", "claims"]
+    assert list(NODES_BY_NAME["redteam"].prerequisites) == ["scan"]
+    assert list(NODES_BY_NAME["rubric"].prerequisites) == ["scan"]
+    assert list(NODES_BY_NAME["reference"].prerequisites) == ["scan"]
+    assert "estimate" not in NODES_BY_NAME["eval"].prerequisites
+    assert "approve" not in NODES_BY_NAME["eval"].prerequisites
 
 
 def test_estimate_for_redteam_is_not_claim_based() -> None:
@@ -71,7 +89,7 @@ def test_estimate_for_redteam_is_not_claim_based() -> None:
     row = report.row("redteam")
 
     assert row.model_calls > 0
-    assert row.source.startswith("redteam[")
+    assert row.source.startswith("redteam(")
     assert report.row("claims").model_calls == 0  # claims disabled (grounding+relevance off)
 
 
@@ -88,7 +106,7 @@ def test_estimate_for_relevance_includes_claim_path() -> None:
     claims_row = report.row("claims")
 
     # relevance row = claims + relevance combined; formula annotates the relevance portion
-    assert relevance_row.source.startswith("claims + relevance[")
+    assert relevance_row.source.startswith("claims + relevance(")
 
     estimator = CostEstimator(cfg)
     individual_claims = estimator._estimate_node("claims", meta).model_calls
@@ -96,7 +114,7 @@ def test_estimate_for_relevance_includes_claim_path() -> None:
     assert relevance_row.model_calls == individual_claims + individual_relevance
 
     # claims row shows claims with its formula
-    assert claims_row.source.startswith("claims[")
+    assert claims_row.source.startswith("claims(")
 
 
 def test_estimate_for_rubric_uses_rule_count() -> None:
@@ -121,10 +139,10 @@ def test_estimate_for_rubric_uses_rule_count() -> None:
     row = report.row("rubric")
 
     assert row.model_calls > 0
-    assert row.source.startswith("rubric[")
+    assert row.source.startswith("rubric(")
 
 
-def test_case_eligibility_requires_context_for_claim_path_and_rubric_for_rubric() -> None:
+def test_case_eligibility_generation_for_claims_question_for_relevance_context_for_grounding() -> None:
     from lumiseval_core.types import EvalCase, Rubric
 
     no_context = EvalCase(case_id="c1", generation="answer")
@@ -134,17 +152,28 @@ def test_case_eligibility_requires_context_for_claim_path_and_rubric_for_rubric(
         context=["context passage"],
         rubric=[Rubric(id="R-1", statement="s", pass_condition="p")],
     )
+    with_question = EvalCase(case_id="c3", generation="answer", question="What is it?")
 
-    assert not NodeRunner.is_case_eligible_for_node(no_context, "claims")
-    assert not NodeRunner.is_case_eligible_for_node(no_context, "relevance")
-    assert not NodeRunner.is_case_eligible_for_node(no_context, "grounding")
-    assert not NodeRunner.is_case_eligible_for_node(no_context, "rubric")
-    assert NodeRunner.is_case_eligible_for_node(no_context, "redteam")
-
+    # claims only requires generation
+    assert NodeRunner.is_case_eligible_for_node(no_context, "claims")
     assert NodeRunner.is_case_eligible_for_node(with_context_and_rubric, "claims")
-    assert NodeRunner.is_case_eligible_for_node(with_context_and_rubric, "relevance")
+
+    # relevance requires question
+    assert not NodeRunner.is_case_eligible_for_node(no_context, "relevance")
+    assert not NodeRunner.is_case_eligible_for_node(with_context_and_rubric, "relevance")
+    assert NodeRunner.is_case_eligible_for_node(with_question, "relevance")
+
+    # grounding requires context
+    assert not NodeRunner.is_case_eligible_for_node(no_context, "grounding")
     assert NodeRunner.is_case_eligible_for_node(with_context_and_rubric, "grounding")
+
+    # rubric requires rubric field
+    assert not NodeRunner.is_case_eligible_for_node(no_context, "rubric")
     assert NodeRunner.is_case_eligible_for_node(with_context_and_rubric, "rubric")
+
+    # reference requires reference field; redteam only requires generation
+    assert not NodeRunner.is_case_eligible_for_node(no_context, "reference")
+    assert NodeRunner.is_case_eligible_for_node(no_context, "redteam")
 
 
 def test_disabled_nodes_have_zero_cost() -> None:
@@ -159,6 +188,16 @@ def test_disabled_nodes_have_zero_cost() -> None:
 
     for node in ("claims", "grounding", "relevance", "redteam", "rubric"):
         assert report.row(node).model_calls == 0, f"{node} should be zero cost when disabled"
+
+
+def test_dedupe_has_zero_individual_llm_cost() -> None:
+    cfg = EvalJobConfig(job_id="j5b", enable_grounding=True, enable_relevance=False)
+    report = CostEstimator(cfg).estimate(_meta())
+    row = report.row("dedupe")
+
+    assert row.individual_cost_usd == 0.0
+    # Cumulative dedupe cost still includes upstream claim extraction when enabled.
+    assert row.cost_usd == report.row("claims").cost_usd
 
 
 def test_eval_row_is_sum_of_all_metric_nodes() -> None:
@@ -209,3 +248,43 @@ def test_eval_row_is_sum_of_all_metric_nodes() -> None:
     assert "relevance" in eval_row.source
     assert "redteam" in eval_row.source
     assert "rubric" in eval_row.source
+
+
+def test_estimate_can_use_node_overrides_for_delta_costing() -> None:
+    cfg = EvalJobConfig(job_id="j7")
+    meta = _meta()
+    overrides = {node: NodeCostBreakdown(model_calls=0, cost_usd=0.0) for node in NODE_ORDER}
+    overrides["redteam"] = NodeCostBreakdown(model_calls=4, cost_usd=0.2)
+    eligible = {node: 0 for node in NODE_ORDER}
+    eligible["redteam"] = 2
+
+    report = CostEstimator(cfg).estimate(
+        meta,
+        individual_overrides=overrides,
+        eligible_overrides=eligible,
+    )
+
+    assert report.row("redteam").model_calls == 4
+    assert report.row("redteam").individual_cost_usd == 0.2
+    assert report.row("redteam").eligible_records == 2
+    assert report.row("eval").cost_usd == 0.2
+
+
+def test_eval_run_injects_cost_estimate_without_graph_estimate_node(tmp_path) -> None:
+    runner = CachedNodeRunner(cache_store=CacheStore(tmp_path))
+    cfg = EvalJobConfig(
+        job_id="j8",
+        enable_grounding=False,
+        enable_relevance=False,
+        enable_redteam=False,
+        enable_rubric=False,
+        enable_reference=False,
+    )
+    case = EvalCase(case_id="c-eval", generation="A concise answer.")
+
+    result = runner.run_case(case=case, node_name="eval", job_config=cfg)
+
+    assert result.final_state.get("cost_estimate") is not None
+    report = result.final_state.get("report")
+    assert report is not None
+    assert report.cost_estimate is not None

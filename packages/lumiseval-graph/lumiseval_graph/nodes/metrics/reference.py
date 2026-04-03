@@ -31,7 +31,7 @@ nltk.download("wordnet", quiet=True)
 nltk.download("omw-1.4", quiet=True)
 
 
-class ReferenceMetricsNode(BaseMetricNode):
+class ReferenceNode(BaseMetricNode):
     node_name = "reference"
     SYSTEM_PROMPT = ""  # No LLM — these are reference-based lexical metrics
     USER_PROMPT = ""
@@ -121,7 +121,7 @@ if __name__ == "__main__":
     """
     from pprint import pprint
 
-    node = ReferenceMetricsNode()
+    node = ReferenceNode()
     print(repr(node))
 
     generation = (

@@ -7,7 +7,7 @@ Uses Rich for colored output. Import get_node_logger() in each node module.
 
 from datetime import datetime
 
-from lumiseval_core.pipeline import NODE_COLORS
+from lumiseval_core.pipeline import NODES_BY_NAME
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
@@ -25,7 +25,7 @@ class NodeLogger:
 
     def __init__(self, node_name: str) -> None:
         self.node = node_name
-        self.color = NODE_COLORS.get(node_name, "white")
+        self.color = NODES_BY_NAME[node_name].color if node_name in NODES_BY_NAME else "white"
 
     def _ts(self) -> str:
         return datetime.now().strftime("%H:%M:%S")

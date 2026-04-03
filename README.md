@@ -51,6 +51,8 @@ lumis-eval/
 ├── infra/                  # Placeholder for Docker / Terraform
 ├── docs/
 │   ├── architecture.md
+│   ├── cli-code-flow.md
+│   ├── execution-model.md
 │   └── get-started.md
 ├── .github/workflows/ci.yml
 ├── pyproject.toml          # Root workspace config
@@ -68,6 +70,12 @@ lumis-eval/
 | `lumiseval-graph` | LangGraph orchestration graph, node runners, claim extraction, relevance/grounding/redteam/rubric metrics, estimate, and final eval |
 | `lumiseval-api` | FastAPI REST interface (`POST /jobs`, `GET /jobs/{id}/report`) |
 | `lumiseval-cli` | Typer CLI (`lumiseval run <node_name> --input <source>`) |
+
+## Docs
+
+- `docs/get-started.md` — setup, node list, and CLI usage
+- `docs/cli-code-flow.md` — end-to-end call flow for `estimate` and `run`
+- `docs/execution-model.md` — traced execution model, including which parts run sequentially vs in parallel
 
 ## Quick start
 

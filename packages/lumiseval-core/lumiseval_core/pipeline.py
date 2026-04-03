@@ -2,8 +2,7 @@
 Centralized pipeline topology registry.
 
 Single source of truth for node ordering, prerequisite chains, eligibility
-flags, display colors, legacy name aliases, environment key prefixes, and
-skip-output shapes.
+flags, display colors, environment key prefixes, and skip-output shapes.
 
 Function objects are NOT stored here — they live in lumiseval-graph so this
 module can be imported by lumiseval-core, lumiseval-ingest, lumiseval-graph,
@@ -27,8 +26,15 @@ class NodeSpec:
     prerequisites: tuple[str, ...] = ()
     """Ordered names of all nodes that must have run before this node."""
 
+     # ── Eligibility ───────────────────────────────────────────────────────
+    requires_generation: bool = False
+
     # ── Eligibility ───────────────────────────────────────────────────────
     requires_context: bool = False
+    """Skip this node when the case has no context passages."""
+
+    # ── Eligibility ───────────────────────────────────────────────────────
+    requires_question: bool = False
     """Skip this node when the case has no context passages."""
 
     requires_rubric: bool = False
@@ -41,7 +47,7 @@ class NodeSpec:
     """Node produces metric results and participates in the parallel fan-out."""
 
     is_preflight: bool = False
-    """Node runs before any LLM calls; CLI skips cost confirmation when target is preflight-only."""
+    """Node runs before any LLM calls and is part of lightweight preflight passes."""
 
     # ── Cost routing ──────────────────────────────────────────────────────
     cost_category: str = ""
@@ -52,9 +58,6 @@ class NodeSpec:
     """Rich color string used by NodeLogger."""
 
     # ── Naming ────────────────────────────────────────────────────────────
-    legacy_aliases: tuple[str, ...] = ()
-    """Historical node names that normalize to `name`."""
-
     env_key_suffixes: tuple[str, ...] = ()
     """Upper-case env-key suffixes tried when reading LLM_*_MODEL env vars."""
 
@@ -76,95 +79,77 @@ PIPELINE: list[NodeSpec] = [
         prerequisites=(),
         is_preflight=True,
         color="cyan",
-        legacy_aliases=("metadata_scanner",),
-        env_key_suffixes=("SCAN", "METADATA_SCANNER"),
-    ),
-    NodeSpec(
-        name="estimate",
-        prerequisites=("scan",),
-        is_preflight=True,
-        color="yellow",
-        legacy_aliases=("cost_estimator",),
-        env_key_suffixes=("ESTIMATE", "COST_ESTIMATOR"),
-    ),
-    NodeSpec(
-        name="approve",
-        prerequisites=("scan", "estimate"),
-        is_preflight=True,
-        color="white",
-        legacy_aliases=("confirm_gate",),
-        env_key_suffixes=("APPROVE", "CONFIRM_GATE"),
+        env_key_suffixes=("SCAN",),
     ),
     NodeSpec(
         name="chunk",
-        prerequisites=("scan", "estimate", "approve"),
-        requires_context=True,
+        prerequisites=("scan",),
+        requires_generation=True,
         cost_category="claim_extraction",
         color="blue",
-        legacy_aliases=("chunker",),
-        env_key_suffixes=("CHUNK", "CHUNKER"),
+        env_key_suffixes=("CHUNK",),
         skip_output={"chunks": []},
     ),
     NodeSpec(
         name="claims",
-        prerequisites=("scan", "estimate", "approve", "chunk"),
-        requires_context=True,
+        prerequisites=("scan", "chunk"),
+        requires_generation=True,
         cost_category="claim_extraction",
         color="magenta",
-        legacy_aliases=("claim_extractor",),
-        env_key_suffixes=("CLAIMS", "CLAIM_EXTRACTOR"),
+        env_key_suffixes=("CLAIMS",),
         skip_output={"raw_claims": []},
     ),
     NodeSpec(
         name="dedupe",
-        prerequisites=("scan", "estimate", "approve", "chunk", "claims"),
-        requires_context=True,
+        prerequisites=("scan", "chunk", "claims"),
+        requires_generation=True,
         color="green",
-        legacy_aliases=("mmr_deduplicator",),
-        env_key_suffixes=("DEDUPE", "MMR_DEDUPLICATOR"),
+        env_key_suffixes=("DEDUPE",),
         skip_output={"unique_claims": []},
     ),
     NodeSpec(
         name="relevance",
-        prerequisites=("scan", "estimate", "approve", "chunk", "claims", "dedupe"),
-        requires_context=True,
+        prerequisites=("scan", "chunk", "claims", "dedupe"),
+        requires_generation=True,
+        requires_question=True,
         is_metric=True,
         color="bright_green",
-        legacy_aliases=("ragas",),
-        env_key_suffixes=("RELEVANCE", "RAGAS"),
+        env_key_suffixes=("RELEVANCE",),
         skip_output={"relevance_metrics": []},
     ),
     NodeSpec(
         name="grounding",
-        prerequisites=("scan", "estimate", "approve", "chunk", "claims", "dedupe"),
+        prerequisites=("scan", "chunk", "claims", "dedupe"),
+        requires_generation=True,
         requires_context=True,
         is_metric=True,
         color="cornflower_blue",
-        legacy_aliases=("hallucination",),
-        env_key_suffixes=("GROUNDING", "HALLUCINATION"),
+        env_key_suffixes=("GROUNDING",),
         skip_output={"grounding_metrics": []},
     ),
     NodeSpec(
         name="redteam",
-        prerequisites=("scan", "estimate", "approve"),
+        prerequisites=("scan",),
+        requires_generation=True,
         is_metric=True,
         color="red",
-        legacy_aliases=("adversarial",),
-        env_key_suffixes=("REDTEAM", "ADVERSARIAL"),
+        env_key_suffixes=("REDTEAM",),
         skip_output={"redteam_metrics": []},
     ),
     NodeSpec(
         name="rubric",
-        prerequisites=("scan", "estimate", "approve"),
+        prerequisites=("scan",),
+        requires_generation=True,
         requires_rubric=True,
         is_metric=True,
         color="orchid",
-        env_key_suffixes=("RUBRIC", "RUBRIC_EVAL"),
+        env_key_suffixes=("RUBRIC",),
         skip_output={"rubric_metrics": []},
     ),
     NodeSpec(
         name="reference",
-        prerequisites=("scan", "estimate", "approve"),
+        prerequisites=("scan",),
+        requires_generation=True,
         requires_reference=True,
         is_metric=True,
         color="bright_magenta",
@@ -175,8 +160,6 @@ PIPELINE: list[NodeSpec] = [
         name="eval",
         prerequisites=(
             "scan",
-            "estimate",
-            "approve",
             "chunk",
             "claims",
             "dedupe",
@@ -192,37 +175,13 @@ PIPELINE: list[NodeSpec] = [
 ]
 
 # ── Derived constants (computed once at import time) ──────────────────────────
+# Adding a new node? Just append a NodeSpec to PIPELINE above — nothing else here needs updating.
 
 NODES_BY_NAME: dict[str, NodeSpec] = {s.name: s for s in PIPELINE}
 
 NODE_ORDER: list[str] = [s.name for s in PIPELINE]
 """Stable ordered list of all canonical node names."""
 
-LEGACY_ALIASES: dict[str, str] = {alias: s.name for s in PIPELINE for alias in s.legacy_aliases}
-"""Flat map from every legacy alias to its canonical node name."""
-
-CONTEXT_REQUIRED_NODES: frozenset[str] = frozenset(s.name for s in PIPELINE if s.requires_context)
-
-RUBRIC_REQUIRED_NODES: frozenset[str] = frozenset(s.name for s in PIPELINE if s.requires_rubric)
-
-REFERENCE_REQUIRED_NODES: frozenset[str] = frozenset(
-    s.name for s in PIPELINE if s.requires_reference
-)
-
-PREFLIGHT_NODES: frozenset[str] = frozenset(s.name for s in PIPELINE if s.is_preflight)
-
 METRIC_NODES: list[str] = [s.name for s in PIPELINE if s.is_metric]
 """Ordered list of metric node names (the parallel fan-out group)."""
 
-NODE_COLORS: dict[str, str] = {s.name: s.color for s in PIPELINE}
-
-SKIP_OUTPUTS: dict[str, dict[str, Any]] = {s.name: s.skip_output for s in PIPELINE if s.skip_output}
-
-NODE_PREREQUISITES: dict[str, list[str]] = {s.name: list(s.prerequisites) for s in PIPELINE}
-
-NODE_ENV_KEY_SUFFIXES: dict[str, list[str]] = {s.name: list(s.env_key_suffixes) for s in PIPELINE}
-
-
-def normalize_node_name(node_name: str) -> str:
-    """Map any legacy alias or canonical name to the canonical node name."""
-    return LEGACY_ALIASES.get(node_name, node_name)
