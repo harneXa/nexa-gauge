@@ -100,11 +100,11 @@ PIPELINE: list[NodeSpec] = [
         skip_output={"raw_claims": []},
     ),
     NodeSpec(
-        name="dedupe",
+        name="dedup",
         prerequisites=("scan", "chunk", "claims"),
         requires_generation=True,
         color="green",
-        env_key_suffixes=("DEDUPE",),
+        env_key_suffixes=("Dedup",),
         skip_output={"unique_claims": []},
     ),
     NodeSpec(
@@ -120,7 +120,7 @@ PIPELINE: list[NodeSpec] = [
     ),
     NodeSpec(
         name="relevance",
-        prerequisites=("scan", "chunk", "claims", "dedupe"),
+        prerequisites=("scan", "chunk", "claims", "dedup"),
         requires_generation=True,
         requires_question=True,
         is_metric=True,
@@ -130,7 +130,7 @@ PIPELINE: list[NodeSpec] = [
     ),
     NodeSpec(
         name="grounding",
-        prerequisites=("scan", "chunk", "claims", "dedupe"),
+        prerequisites=("scan", "chunk", "claims", "dedup"),
         requires_generation=True,
         requires_context=True,
         is_metric=True,
@@ -173,7 +173,7 @@ PIPELINE: list[NodeSpec] = [
             "scan",
             "chunk",
             "claims",
-            "dedupe",
+            "dedup",
             "geval_steps",
             "relevance",
             "grounding",

@@ -23,7 +23,7 @@ NODE_FNS: dict[str, NodeFn] = {
     "scan": _graph.node_metadata_scanner,
     "chunk": _graph.node_chunk,
     "claims": _graph.node_claims,
-    "dedupe": _graph.node_dedupe,
+    "dedup": _graph.node_dedup,
     "geval_steps": _graph.node_geval_steps,
     "relevance": _graph.node_relevance,
     "grounding": _graph.node_grounding,

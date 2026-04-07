@@ -122,7 +122,7 @@ Every node function lives in `lumiseval_graph/nodes/` and is registered in `regi
 | `scan` | `node_metadata_scanner` | Tokenize, chunk-count, build `InputMetadata` |
 | `chunk` | `node_chunk` | Split generation into `Chunk` objects |
 | `claims` | `node_claims` | LLM: extract factual claims from chunks |
-| `dedupe` | `node_dedupe` | MMR-based deduplication of extracted claims |
+| `dedup` | `node_dedup` | MMR-based deduplication of extracted claims |
 | `geval_steps` | `node_geval_steps` | LLM: generate reusable evaluation steps for criteria-only GEval metrics |
 | `relevance` | `node_relevance` | LLM metric: answer relevancy vs. question |
 | `grounding` | `node_grounding` | LLM metric: faithfulness vs. context passages |
@@ -213,7 +213,7 @@ plan_dataset()  ──────────────────► Datase
 
   run_case()  (per case)
      │
-     ├── sequential nodes: scan → chunk → claims → dedupe
+     ├── sequential nodes: scan → chunk → claims → dedup
      │
      ├── parallel metric nodes for `eval` target only:
      │     relevance ║ grounding ║ redteam ║ geval ║ reference

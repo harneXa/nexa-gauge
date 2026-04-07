@@ -10,10 +10,10 @@ flowchart TB
   SCAN --> REFERENCE["reference"]
 
   CHUNK --> CLAIMS["claims"]
-  CLAIMS --> DEDUPE["dedupe"]
+  CLAIMS --> Dedup["dedup"]
 
-  DEDUPE --> RELEVANCE["relevance"]
-  DEDUPE --> GROUNDING["grounding"]
+  Dedup --> RELEVANCE["relevance"]
+  Dedup --> GROUNDING["grounding"]
 
   GEVAL_STEPS --> GEVAL["geval"]
 
@@ -31,7 +31,7 @@ Execution examples:
   - does not execute graph nodes
 
 - `lumiseval run grounding --input sample.json`
-  - runs strict dependency path: `scan -> chunk -> claims -> dedupe -> grounding`
+  - runs strict dependency path: `scan -> chunk -> claims -> dedup -> grounding`
   - reuses node cache where available
 
 - `lumiseval run eval --input sample.json`

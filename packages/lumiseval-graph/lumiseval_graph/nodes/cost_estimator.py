@@ -36,7 +36,7 @@ from rich.text import Text
 
 from lumiseval_graph.llm.config import get_judge_model
 from lumiseval_graph.nodes.claim_extractor import ClaimExtractorNode
-from lumiseval_graph.nodes.metrics.dedupe import DedupeNode
+from lumiseval_graph.nodes.metrics.dedup import DedupNode
 from lumiseval_graph.nodes.metrics.geval import GevalNode, GevalStepsNode
 from lumiseval_graph.nodes.metrics.grounding import GroundingNode
 from lumiseval_graph.nodes.metrics.redteam import RedteamNode
@@ -101,7 +101,7 @@ class CostReport:
             total_records: Dataset size used for optional coverage column.
             highlight_nodes: Optional set of node names to visually emphasize.
                 Typical usage is highlighting the strict target branch selected
-                by the CLI (for example, scan → chunk → claims → dedupe → grounding).
+                by the CLI (for example, scan → chunk → claims → dedup → grounding).
             visible_nodes: Optional set of node names to render. When omitted,
                 all rows are shown in pipeline order.
             target_node: Optional node name whose row should display the total
@@ -219,7 +219,7 @@ class CostReport:
 # Maps node name → the class whose cost_estimate() to call.
 _COST_NODES: dict[str, type] = {
     "claims": ClaimExtractorNode,
-    "dedupe": DedupeNode,
+    "dedup": DedupNode,
     "geval_steps": GevalStepsNode,
     "grounding": GroundingNode,
     "relevance": RelevanceNode,
@@ -231,7 +231,7 @@ _COST_NODES: dict[str, type] = {
 # Determines whether a node is active given the job config.
 _NODE_ENABLED: dict[str, Callable[[EvalJobConfig], bool]] = {
     "claims": lambda c: c.enable_relevance or c.enable_grounding,
-    "dedupe": lambda c: c.enable_relevance or c.enable_grounding,
+    "dedup": lambda c: c.enable_relevance or c.enable_grounding,
     "geval_steps": lambda c: c.enable_geval,
     "grounding": lambda c: c.enable_grounding,
     "relevance": lambda c: c.enable_relevance,
@@ -267,7 +267,7 @@ class CostEstimator:
         Fallback:
           - synthetic metadata fixtures that omit ``records`` still use cost_meta
             aggregates for metric nodes and record_count for shared generation
-            nodes (chunk/claims/dedupe).
+            nodes (chunk/claims/dedup).
         """
         if metadata.records:
             return sum(
@@ -279,7 +279,7 @@ class CostEstimator:
         mapping: dict[str, int] = {
             "chunk": int(metadata.cost_meta.claim.eligible_records),
             "claims": int(metadata.cost_meta.claim.eligible_records),
-            "dedupe": int(metadata.cost_meta.claim.eligible_records),
+            "dedup": int(metadata.cost_meta.claim.eligible_records),
             "geval_steps": int(metadata.cost_meta.geval_steps.eligible_records),
             "grounding": int(metadata.cost_meta.grounding.eligible_records),
             "relevance": int(metadata.cost_meta.relevance.eligible_records),
@@ -296,7 +296,7 @@ class CostEstimator:
         """Return the cost_meta object for a given node."""
         return {
             "claims": metadata.cost_meta.claim,
-            "dedupe": metadata.cost_meta.grounding,
+            "dedup": metadata.cost_meta.grounding,
             "geval_steps": metadata.cost_meta.geval_steps,
             "grounding": metadata.cost_meta.grounding,
             "relevance": metadata.cost_meta.relevance,

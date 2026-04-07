@@ -69,7 +69,7 @@ flowchart TB
 
     SCAN["🔍 scan\ntokenise · count · eligibility"] --> CHK["📄 chunk\n~100-tok windows"]
     CHK --> CLM["🧩 claims\nextract atomic claims per chunk"]
-    CLM --> DDP["🔀 dedupe\nMMR cosine dedup"]
+    CLM --> DDP["🔀 dedup\nMMR cosine dedup"]
     SCAN -- has_generation --> RDT
     SCAN -- has_geval --> GVS
     GVS --> GVT

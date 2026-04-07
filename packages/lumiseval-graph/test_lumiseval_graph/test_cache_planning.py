@@ -38,7 +38,7 @@ def test_grounding_plan_reuses_cached_claim_path(tmp_path) -> None:
     _seed_cache_for_target(store, case=case, cfg=cfg, target_node="relevance")
     plan = runner.plan_dataset(cases=[case], node_name="grounding", job_config=cfg)
 
-    for shared_step in ("scan", "chunk", "claims", "dedupe"):
+    for shared_step in ("scan", "chunk", "claims", "dedup"):
         assert plan.cached_count(shared_step) == 1
         assert plan.to_run_count(shared_step) == 0
     assert plan.to_run_count("grounding") == 1

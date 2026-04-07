@@ -6,7 +6,7 @@ This document describes the current GEval-only execution model after the legacy 
 
 ```text
 scan
-├─ chunk -> claims -> dedupe -> {relevance, grounding}
+├─ chunk -> claims -> dedup -> {relevance, grounding}
 ├─ geval_steps -> geval
 ├─ redteam
 └─ reference
@@ -17,7 +17,7 @@ scan
 ## Eligibility Gates
 
 - `generation` required for all nodes
-- `context` required for `chunk`, `claims`, `dedupe`, `relevance`, `grounding`
+- `context` required for `chunk`, `claims`, `dedup`, `relevance`, `grounding`
 - `question` required for `relevance`
 - `geval.metrics` required for `geval_steps`, `geval`
 - `reference` required for `reference`

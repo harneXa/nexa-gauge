@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 from pydantic import BaseModel
-
+import re
 import tiktoken
 
 from .constants import TIKTOKEN_ENCODING
@@ -16,6 +16,31 @@ _ENCODER = tiktoken.get_encoding(TIKTOKEN_ENCODING)
 
 def _count_tokens(text: str) -> int:
     return len(_ENCODER.encode(text))
+
+
+
+
+
+
+
+# Matches str.format() style placeholders: {context}, {claims}, {question}, etc.
+_PLACEHOLDER_RE = re.compile(r"\{[^}]+\}")
+
+
+def template_static_tokens(template: str) -> int:
+    """Return the token count of the static (non-placeholder) portions of *template*.
+
+    Strips all ``{placeholder}`` patterns before counting, giving the fixed
+    prompt overhead that every LLM call for this node pays independent of the
+    dynamic content (context passages, claims list, question, etc.).
+
+    Example::
+
+        template_static_tokens("Context:\\n{context}\\n\\nClaims:\\n{claims}")
+        # → tokens("Context:\\n\\n\\nClaims:\\n")
+    """
+    stripped = _PLACEHOLDER_RE.sub("", template)
+    return count_tokens(stripped)
 
 
 def _to_serializable(obj: Any) -> Any:

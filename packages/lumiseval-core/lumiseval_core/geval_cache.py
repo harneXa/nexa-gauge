@@ -12,7 +12,7 @@ from typing import Iterable, Optional
 from pydantic import BaseModel
 
 from lumiseval_core.constants import CACHE_DIR
-from lumiseval_core.types import EvalCase
+from lumiseval_core.types import EvalCase, GevalCriteria, GevalEvaluationStep
 
 GEVAL_STEPS_PROMPT_VERSION = "v1"
 GEVAL_STEPS_PARSER_VERSION = "v1"
@@ -26,8 +26,8 @@ class GevalStepsArtifact(BaseModel):
     model: str
     prompt_version: str
     parser_version: str
-    criteria: str
-    evaluation_steps: list[str]
+    criteria: GevalCriteria
+    evaluation_steps: list[GevalEvaluationStep]
     created_at: str
 
 
@@ -55,16 +55,20 @@ def collect_geval_signatures(
 
     signatures: set[str] = set()
     for case in cases:
-        if case.geval is None:
+        geval = case.input_payload.geval if case.input_payload else None
+        if geval is None:
             continue
-        for metric in case.geval.metrics:
+        for metric in geval.metrics:
             if metric.evaluation_steps:
                 continue
-            if not metric.criteria:
+            if metric.criteria is None:
+                continue
+            criteria_text = (metric.criteria.text or "").strip()
+            if not criteria_text:
                 continue
             signatures.add(
                 compute_geval_signature(
-                    criteria=metric.criteria,
+                    criteria=criteria_text,
                     model=model,
                     prompt_version=prompt_version,
                     parser_version=parser_version,
@@ -87,14 +91,47 @@ class GevalArtifactCache:
     @staticmethod
     def _coerce_artifact(raw: dict, signature: str) -> GevalStepsArtifact:
         """Parse a persisted GEval artifact payload into GevalStepsArtifact."""
+        raw_criteria = raw.get("criteria", {})
+        if isinstance(raw_criteria, dict):
+            criteria = GevalCriteria(
+                text=str(raw_criteria.get("text", "")).strip(),
+                tokens=float(raw_criteria.get("tokens", 0.0) or 0.0),
+                cached=bool(raw_criteria.get("cached", True)),
+            )
+        else:
+            criteria = GevalCriteria(
+                text=str(raw_criteria or "").strip(),
+                tokens=0.0,
+                cached=True,
+            )
+
+        raw_steps = raw.get("evaluation_steps", [])
+        steps: list[GevalEvaluationStep] = []
+        for item in raw_steps if isinstance(raw_steps, list) else []:
+            if isinstance(item, dict):
+                text = str(item.get("text", "")).strip()
+                if not text:
+                    continue
+                steps.append(
+                    GevalEvaluationStep(
+                        text=text,
+                        tokens=float(item.get("tokens", 0.0) or 0.0),
+                    )
+                )
+                continue
+
+            text = str(item or "").strip()
+            if not text:
+                continue
+            steps.append(GevalEvaluationStep(text=text, tokens=0.0))
 
         return GevalStepsArtifact(
             signature=str(raw.get("signature", signature)),
             model=str(raw.get("model", "")),
             prompt_version=str(raw.get("prompt_version", GEVAL_STEPS_PROMPT_VERSION)),
             parser_version=str(raw.get("parser_version", GEVAL_STEPS_PARSER_VERSION)),
-            criteria=str(raw.get("criteria", "")).strip(),
-            evaluation_steps=list(raw.get("evaluation_steps", [])),
+            criteria=criteria,
+            evaluation_steps=steps,
             created_at=str(raw.get("created_at", "")),
         )
 
@@ -115,13 +152,13 @@ class GevalArtifactCache:
 
         return self._read(self._path(signature), signature)
 
-    def get_steps(self, signature: str) -> Optional[list[str]]:
+    def get_steps(self, signature: str) -> Optional[list[GevalEvaluationStep]]:
         """Return cached evaluation steps for a signature, when present."""
 
         artifact = self.get(signature)
         if artifact is None:
             return None
-        return list(artifact.evaluation_steps)
+        return [GevalEvaluationStep(**step.model_dump()) for step in artifact.evaluation_steps]
 
     def has(self, signature: str) -> bool:
         """True when an artifact exists and can be parsed."""
@@ -140,8 +177,8 @@ class GevalArtifactCache:
         *,
         signature: str,
         model: str,
-        criteria: str,
-        evaluation_steps: list[str],
+        criteria: GevalCriteria,
+        evaluation_steps: list[GevalEvaluationStep],
         prompt_version: str = GEVAL_STEPS_PROMPT_VERSION,
         parser_version: str = GEVAL_STEPS_PARSER_VERSION,
     ) -> GevalStepsArtifact:
@@ -152,8 +189,8 @@ class GevalArtifactCache:
             model=model,
             prompt_version=prompt_version,
             parser_version=parser_version,
-            criteria=criteria.strip(),
-            evaluation_steps=list(evaluation_steps),
+            criteria=GevalCriteria(**criteria.model_dump()),
+            evaluation_steps=[GevalEvaluationStep(**step.model_dump()) for step in evaluation_steps],
             created_at=datetime.now(timezone.utc).isoformat(),
         )
         self.put(artifact)

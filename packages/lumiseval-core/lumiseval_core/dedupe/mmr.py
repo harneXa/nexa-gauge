@@ -12,7 +12,7 @@ from sentence_transformers import SentenceTransformer
 
 from lumiseval_core.config import config
 from lumiseval_core.constants import MMR_LAMBDA, MMR_SIMILARITY_THRESHOLD
-from lumiseval_core.types import Claim
+from lumiseval_core.types import Item
 
 _SIMILARITY_THRESHOLD = MMR_SIMILARITY_THRESHOLD
 _LAMBDA = MMR_LAMBDA
@@ -33,10 +33,10 @@ def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def deduplicate(
-    claims: list[Claim],
+    items: list[Item],
     similarity_threshold: float = _SIMILARITY_THRESHOLD,
     lmb: float = _LAMBDA,
-) -> tuple[list[Claim], dict[int, int]]:
+) -> tuple[list[Item], dict[int, int]]:
     """Deduplicate claims using Maximal Marginal Relevance.
 
     Args:
@@ -49,26 +49,26 @@ def deduplicate(
         unique_claims: Claims that survive deduplication.
         dedup_map: Mapping from discarded claim index -> retained representative index.
     """
-    if len(claims) < 2:
-        return claims, {}
+    if len(items) < 2:
+        return items, {}
 
     model = _get_model()
-    texts = [c.text for c in claims]
+    texts = [c.text for c in items]
     embeddings = model.encode(texts, show_progress_bar=False)  # shape: (N, D)
 
     selected_indices: list[int] = []
-    candidate_indices = list(range(len(claims)))
+    candidate_indices = list(range(len(items)))
     dedup_map: dict[int, int] = {}
 
     # Start with the highest-confidence claim.
-    best_start = max(candidate_indices, key=lambda i: claims[i].confidence)
+    best_start = max(candidate_indices, key=lambda i: items[i].confidence)
     selected_indices.append(best_start)
     candidate_indices.remove(best_start)
 
     while candidate_indices:
         scores: list[tuple[int, float]] = []
         for ci in candidate_indices:
-            relevance = claims[ci].confidence
+            relevance = items[ci].confidence
             max_sim = max(
                 _cosine_similarity(embeddings[ci], embeddings[si]) for si in selected_indices
             )
@@ -89,6 +89,6 @@ def deduplicate(
         selected_indices.append(best_ci)
         candidate_indices = [c for c in candidate_indices if c not in dedup_map and c != best_ci]
 
-    unique_claims = [claims[i] for i in selected_indices]
-    return unique_claims, dedup_map
+    unique_items: list[Item] = [items[i] for i in selected_indices]
+    return unique_items, dedup_map
 

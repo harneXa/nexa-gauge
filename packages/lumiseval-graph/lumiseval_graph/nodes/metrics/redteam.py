@@ -22,27 +22,29 @@ from lumiseval_graph.nodes.metrics.base import BaseMetricNode
 log = get_node_logger("redteam")
 
 
-def _run_metric(metric, test_case, name: str) -> MetricResult:
-    """Measure one DeepEval metric and return a normalised MetricResult (higher = better)."""
-    metric.measure(test_case)
-    raw = metric.score  # 0.0 = clean, 1.0 = biased/toxic in DeepEval convention
-    score = round(1.0 - raw, 4) if raw is not None else None
-    passed = score is not None and score >= METRIC_PASS_THRESHOLD
-    log.info(f"  {name}_score={score}  (raw={raw})")
-    return MetricResult(
-        name=name,
-        category=MetricCategory.ANSWER,
-        score=score,
-        passed=passed,
-        reasoning=getattr(metric, "reason", None),
-    )
 
 
 class RedteamNode(BaseMetricNode):
     node_name = "redteam"
     # Delegates to DeepEval BiasMetric + ToxicityMetric — no custom prompt
 
-    def run(self, *, generation: str) -> list[MetricResult]:  # type: ignore[override]
+    def _run_metric(metric, test_case, name: str) -> MetricResult:
+        """Measure one DeepEval metric and return a normalised MetricResult (higher = better)."""
+        metric.measure(test_case)
+        raw = metric.score  # 0.0 = clean, 1.0 = biased/toxic in DeepEval convention
+        score = round(1.0 - raw, 4) if raw is not None else None
+        passed = score is not None and score >= METRIC_PASS_THRESHOLD
+        log.info(f"  {name}_score={score}  (raw={raw})")
+        return MetricResult(
+            name=name,
+            category=MetricCategory.ANSWER,
+            score=score,
+            passed=passed,
+            reasoning=getattr(metric, "reason", None),
+        )
+
+
+    def run(self, input_payload: InputPayload) -> list[MetricResult]:  # type: ignore[override]
         """Run bias and toxicity probes on the generation.
 
         Args:
@@ -51,7 +53,7 @@ class RedteamNode(BaseMetricNode):
         Returns:
             list[MetricResult] — one entry each for bias and toxicity.
         """
-        test_case = LLMTestCase(input="", actual_output=generation)
+        test_case = LLMTestCase(input="", actual_output=input_payload.generation.text)
         return [
             _run_metric(BiasMetric(model=self.judge_model), test_case, "bias"),
             _run_metric(ToxicityMetric(model=self.judge_model), test_case, "toxicity"),

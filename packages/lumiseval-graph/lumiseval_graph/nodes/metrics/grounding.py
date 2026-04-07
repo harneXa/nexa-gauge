@@ -8,25 +8,25 @@ Returns a MetricResult with score = fraction of claims supported by context (1.0
 """
 
 from lumiseval_core.types import (
+    AVG_CLAIM_TOKENS,
     Claim,
     Faithfulness,
-    GorundingCostMeta,
     MetricCategory,
     MetricResult,
-    NodeCostBreakdown,
+    GroundingEstimate,
+    EstimateState,
 )
+from lumiseval_core.constants import AVG_OUTPUT_TOKENS_BOOLEAN_VERDICT
 from pydantic import BaseModel
-
 from lumiseval_graph.llm.gateway import get_llm
 from lumiseval_graph.llm.pricing import cost_usd, get_model_pricing
 from lumiseval_graph.log import get_node_logger
-from lumiseval_graph.nodes.metrics.base import BaseMetricNode
-from lumiseval_graph.nodes.metrics.token_utils import count_tokens, template_static_tokens
-
+from lumiseval_graph.nodes.base import BaseMetricNode
+from lumiseval_core.utils import _count_tokens, template_static_tokens
 log = get_node_logger("grounding")
 
 
-class _FaithfulnessResult(BaseModel):
+class _GroundingResult(BaseModel):
     verdicts: list[bool]
 
 
@@ -44,11 +44,11 @@ class GroundingNode(BaseMetricNode):
 
     # Static (non-placeholder) token overhead shared by every call — computed
     # once at class definition time from the prompts above.
-    static_prompt_tokens: int = count_tokens(SYSTEM_PROMPT) + template_static_tokens(USER_PROMPT)
+    static_prompt_tokens: int = _count_tokens(SYSTEM_PROMPT) + template_static_tokens(USER_PROMPT)
 
-    def _faithfulness(self, claims: list[Claim], context: list[str]) -> MetricResult:
-        """Check each claim against context passages; return fraction supported."""
-        context_text = "\n\n".join(context)
+    def _faithfulness(self, claims: list[str], context: list[str]) -> MetricResult:
+        """Check each claim against context passages; return fraction supported."""        
+        context_text = "\n\n".join(payload.input_payload.context)
         numbered = "\n".join(f"{i + 1}. {c.text}" for i, c in enumerate(claims))
         messages = [
             {"role": "system", "content": self.SYSTEM_PROMPT},
@@ -57,9 +57,9 @@ class GroundingNode(BaseMetricNode):
                 "content": self.USER_PROMPT.format(context=context_text, claims=numbered),
             },
         ]
-        llm = get_llm("relevance_faithfulness", _FaithfulnessResult, self.judge_model)
+        llm = get_llm("grounding", _GroundingResult, self.judge_model)
         response = llm.invoke(messages)
-        result: _FaithfulnessResult = response["parsed"]
+        result: _GroundingResult = response["parsed"]
 
         if result is None or not result.verdicts:
             log.warning("Faithfulness LLM call returned no verdicts")
@@ -76,7 +76,7 @@ class GroundingNode(BaseMetricNode):
         ]
 
         return MetricResult(
-            name="faithfulness",
+            name=self.node_name,
             category=MetricCategory.ANSWER,
             score=score,
             result=claim_verdicts,
@@ -84,69 +84,78 @@ class GroundingNode(BaseMetricNode):
 
     def run(  # type: ignore[override]
         self,
-        *,
-        claims: list[Claim],
-        context: list[str],
-        enable_grounding: bool = True,
-    ) -> list[MetricResult]:
+        payload: EvalCase,
+    ) -> GroundingPayload:
         if not claims:
-            log.warning("No claims provided — skipping faithfulness")
+            log.warning("No claims provided — skipping grounding")
             return []
 
         results: list[MetricResult] = []
-
+ 
         if enable_grounding:
             if not context:
-                log.info("No context passages — skipping faithfulness")
+                log.info("No context passages — skipping grounding")
             else:
-                results.append(self._faithfulness(claims, context))
-        return results
+                results.append(
+                    self._faithfulness(
+                        claims=payload.node_claim_generation.claims, 
+                        context=payload.input_payload.context
+                    )
+                )
+        return  GroundingPayload(
+            metrics=results
+            cost=self.estimate(
+                input_tokens=(
+                    payload.node_claim_generation.tokens + 
+                    payload.input_payload.context.tokens
+                )
+                output_tokens=(
+                    payload.node_claim_generation.count*AVG_OUTPUT_TOKENS_BOOLEAN_VERDICT
+                )
+            )
+        ),
+
 
     def cost_estimate(
         self,
-        *,
-        cost_meta: GorundingCostMeta,
-        **_ignored,
-    ) -> NodeCostBreakdown:
-        if cost_meta.eligible_records == 0:
-            return NodeCostBreakdown(model_calls=0, cost_usd=0.0)
-
+        input_tokens: float,
+        output_tokens: float
+    ) -> EstimatePayload: # type: ignore[override]
+       
         pricing = get_model_pricing(self.judge_model)
-        claims = max(1.0, cost_meta.avg_claims_per_record)
+        # claims = max(1.0, cost_meta.avg_claims_per_record)
 
         input_tokens = (
-            self.static_prompt_tokens
-            + cost_meta.avg_context_tokens
-            + round(claims * cost_meta.avg_claim_tokens)
+            self.static_prompt_tokens + input_tokens
         )
-        output_tokens = round(claims * cost_meta.avg_output_token)
-
         cost_per_record = cost_usd(input_tokens, pricing, "input") + cost_usd(
             output_tokens, pricing, "output"
         )
-        return NodeCostBreakdown(
-            model_calls=cost_meta.eligible_records,
-            cost_usd=round(cost_meta.eligible_records * cost_per_record, 6),
+        return EstimatePayload(
+           input_tokens=input_tokens,
+           output_tokens=output_tokens,
+           cost=cost_per_record
         )
 
-    @classmethod
-    def cost_formula(cls, cost_meta: GorundingCostMeta) -> str:
-        claims = max(1.0, cost_meta.avg_claims_per_record)
-        n = cost_meta.eligible_records
-        prompt_t = cls.static_prompt_tokens
-        ctx_t = round(cost_meta.avg_context_tokens)
-        claim_tok = round(cost_meta.avg_claim_tokens)
-        claims_t = round(claims * claim_tok)
-        input_t = prompt_t + ctx_t + claims_t
-        out_tok = round(cost_meta.avg_output_token)
-        output_t = round(claims * out_tok)
-        total_t = n * (input_t + output_t)
-        return (
-            f"calls         = {n}  (1 call/rec, all claims batched)\n"
-            f"input_tokens  = {prompt_t} (prompt tokens) + {ctx_t} (context tokens) + {claims_t} ({claims:.1f} claims × {claim_tok} tok/claim) = {input_t} tok/call\n"
-            f"output_tokens = {output_t} ({claims:.1f} claims × {out_tok} tok/bool_verdict) = {output_t} tok/call\n"
-            f"total_tokens  = {n} × ({input_t} + {output_t}) = {total_t} tok"
-        )
+
+    # @classmethod
+    # def cost_formula(cls, cost_meta: GorundingCostMeta) -> str:
+    #     claims = max(1.0, cost_meta.avg_claims_per_record)
+    #     n = cost_meta.eligible_records
+    #     prompt_t = cls.static_prompt_tokens
+    #     ctx_t = round(cost_meta.avg_context_tokens)
+    #     claim_tok = round(cost_meta.avg_claim_tokens)
+    #     claims_t = round(claims * claim_tok)
+    #     input_t = prompt_t + ctx_t + claims_t
+    #     out_tok = round(cost_meta.avg_output_token)
+    #     output_t = round(claims * out_tok)
+    #     total_t = n * (input_t + output_t)
+    #     return (
+    #         f"calls         = {n}  (1 call/rec, all claims batched)\n"
+    #         f"input_tokens  = {prompt_t} (prompt tokens) + {ctx_t} (context tokens) + {claims_t} ({claims:.1f} claims × {claim_tok} tok/claim) = {input_t} tok/call\n"
+    #         f"output_tokens = {output_t} ({claims:.1f} claims × {out_tok} tok/bool_verdict) = {output_t} tok/call\n"
+    #         f"total_tokens  = {n} × ({input_t} + {output_t}) = {total_t} tok"
+    #     )
 
 
 # ── Manual smoke test ─────────────────────────────────────────────────────────

@@ -23,17 +23,16 @@ from lumiseval_core.types import (
     Claim,
     MetricCategory,
     MetricResult,
-    NodeCostBreakdown,
-    RelevanceCostMeta,
+    RelevanceEstimate,
     Relevancy,
 )
+from lumiseval_core.constants import AVG_OUTPUT_TOKENS_JSON_VERDICT
 from pydantic import BaseModel
-
 from lumiseval_graph.llm.gateway import get_llm
 from lumiseval_graph.llm.pricing import cost_usd, get_model_pricing
 from lumiseval_graph.log import get_node_logger
-from lumiseval_graph.nodes.metrics.base import BaseMetricNode
-from lumiseval_graph.nodes.metrics.token_utils import count_tokens, template_static_tokens
+from lumiseval_graph.nodes.base import BaseMetricNode
+from lumiseval_core.utils import _count_tokens, template_static_tokens
 
 log = get_node_logger("relevance")
 
@@ -67,10 +66,12 @@ class RelevanceNode(BaseMetricNode):
 
     # Static (non-placeholder) token overhead shared by every call — computed
     # once at class definition time from the prompts above.
-    static_prompt_tokens: int = count_tokens(SYSTEM_PROMPT) + template_static_tokens(USER_PROMPT)
+    static_prompt_tokens: int = _count_tokens(SYSTEM_PROMPT) + template_static_tokens(USER_PROMPT)
 
     def _answer_relevancy(self, claims: list[Claim], question: str) -> MetricResult:
         """Classify each claim as relevant / irrelevant / idk; score = relevant / total."""
+        
+
         numbered = "\n".join(f"{i + 1}. {c.text}" for i, c in enumerate(claims))
         messages = [
             {"role": "system", "content": self.SYSTEM_PROMPT},
@@ -113,11 +114,8 @@ class RelevanceNode(BaseMetricNode):
 
     def run(  # type: ignore[override]
         self,
-        *,
-        claims: list[Claim],
-        question: Optional[str] = None,
-        enable_relevance: bool = True,
-    ) -> list[MetricResult]:
+        payload: EvalCase,
+    ) -> RelevancePayload:
         """Compute answer relevancy using pre-extracted claims.
 
         Args:
@@ -128,6 +126,7 @@ class RelevanceNode(BaseMetricNode):
         Returns:
             list[MetricResult] — one entry per enabled metric.
         """
+
         if not claims:
             log.warning("No claims provided — skipping answer relevancy")
             return []
@@ -138,55 +137,66 @@ class RelevanceNode(BaseMetricNode):
             if not question:
                 log.info("No question provided — skipping answer relevancy")
             else:
-                results.append(self._answer_relevancy(claims, question))
+                results.append(
+                    self._answer_relevancy(
+                        claims=payload.node_claim_generation.claims, 
+                        question=payload.input_payload.question.text
+                    )
+                )
 
-        return results
+        return RelevancePayload(
+            metrics=results,
+            cost=self.estimate(
+                input_tokens=(
+                    payload.node_claim_generation.tokens + 
+                    payload.input_payload.question.tokens
+                )
+                output_tokens=(
+                    payload.node_claim_generation.count*AVG_OUTPUT_TOKENS_JSON_VERDICT
+                )
+            )
+        )
 
     def cost_estimate(
         self,
-        *,
-        cost_meta: RelevanceCostMeta,
-        **_ignored,
-    ) -> NodeCostBreakdown:
-        if cost_meta.eligible_records == 0:
-            return NodeCostBreakdown(model_calls=0, cost_usd=0.0)
-
+        input_tokens: str,
+        output_tokens: int,
+    ) -> RelevanceEstimate:
+        
         pricing = get_model_pricing(self.judge_model)
-        claims = max(1.0, cost_meta.avg_claims_per_record)
 
         input_tokens = (
             self.static_prompt_tokens
-            + cost_meta.avg_question_tokens
-            + round(claims * cost_meta.avg_claim_tokens)
+            + input_tokens
         )
-        output_tokens = round(claims * cost_meta.avg_output_token)
 
         cost_per_record = cost_usd(input_tokens, pricing, "input") + cost_usd(
             output_tokens, pricing, "output"
         )
-        return NodeCostBreakdown(
-            model_calls=cost_meta.eligible_records,
-            cost_usd=round(cost_meta.eligible_records * cost_per_record, 6),
+        return EstimatePayload(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost=cost_per_record
         )
-
-    @classmethod
-    def cost_formula(cls, cost_meta: RelevanceCostMeta) -> str:
-        claims = max(1.0, cost_meta.avg_claims_per_record)
-        n = cost_meta.eligible_records
-        prompt_t = cls.static_prompt_tokens
-        q_t = round(cost_meta.avg_question_tokens)
-        claim_tok = round(cost_meta.avg_claim_tokens)
-        claims_t = round(claims * claim_tok)
-        input_t = prompt_t + q_t + claims_t
-        out_tok = round(cost_meta.avg_output_token)
-        output_t = round(claims * out_tok)
-        total_t = n * (input_t + output_t)
-        return (
-            f"calls         = {n}  (1 call/rec, all claims batched)\n"
-            f"input_tokens  = {prompt_t} (prompt tokens) + {q_t} (question tokens) + {claims_t} ({claims:.1f} claims × {claim_tok} tok/claim) = {input_t} tok/call\n"
-            f"output_tokens = {output_t} ({claims:.1f} claims × {out_tok} tok/json_verdict) = {output_t} tok/call\n"
-            f"total_tokens  = {n} × ({input_t} + {output_t}) = {total_t} tok"
-        )
+        
+    # @classmethod
+    # def cost_formula(cls, cost_meta: RelevanceCostMeta) -> str:
+    #     claims = max(1.0, cost_meta.avg_claims_per_record)
+    #     n = cost_meta.eligible_records
+    #     prompt_t = cls.static_prompt_tokens
+    #     q_t = round(cost_meta.avg_question_tokens)
+    #     claim_tok = round(cost_meta.avg_claim_tokens)
+    #     claims_t = round(claims * claim_tok)
+    #     input_t = prompt_t + q_t + claims_t
+    #     out_tok = round(cost_meta.avg_output_token)
+    #     output_t = round(claims * out_tok)
+    #     total_t = n * (input_t + output_t)
+    #     return (
+    #         f"calls         = {n}  (1 call/rec, all claims batched)\n"
+    #         f"input_tokens  = {prompt_t} (prompt tokens) + {q_t} (question tokens) + {claims_t} ({claims:.1f} claims × {claim_tok} tok/claim) = {input_t} tok/call\n"
+    #         f"output_tokens = {output_t} ({claims:.1f} claims × {out_tok} tok/json_verdict) = {output_t} tok/call\n"
+    #         f"total_tokens  = {n} × ({input_t} + {output_t}) = {total_t} tok"
+    #     )
 
 
 # ── Manual smoke test ─────────────────────────────────────────────────────────

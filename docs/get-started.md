@@ -46,7 +46,7 @@ Canonical target nodes:
 - `scan`
 - `chunk`
 - `claims`
-- `dedupe`
+- `dedup`
 - `geval_steps`
 - `geval`
 - `relevance`
@@ -59,11 +59,11 @@ Strict prerequisite paths:
 
 - `chunk <- scan`
 - `claims <- scan, chunk`
-- `dedupe <- scan, chunk, claims`
+- `dedup <- scan, chunk, claims`
 - `geval_steps <- scan`
 - `geval <- scan, geval_steps`
-- `relevance <- scan, chunk, claims, dedupe`
-- `grounding <- scan, chunk, claims, dedupe`
+- `relevance <- scan, chunk, claims, dedup`
+- `grounding <- scan, chunk, claims, dedup`
 - `redteam <- scan`
 - `reference <- scan`
 - `eval <- scan + all branches`
@@ -71,7 +71,7 @@ Strict prerequisite paths:
 Examples:
 
 - `lumiseval run redteam ...` runs `scan -> redteam`
-- `lumiseval run relevance ...` runs `scan -> chunk -> claims -> dedupe -> relevance`
+- `lumiseval run relevance ...` runs `scan -> chunk -> claims -> dedup -> relevance`
 - `lumiseval run eval ...` runs full graph branch set
 
 ## 4) Input Records
@@ -108,7 +108,7 @@ Recommended full record:
 Eligibility by field:
 
 - `generation` required for all nodes
-- `context` required for: `chunk`, `claims`, `dedupe`, `relevance`, `grounding`
+- `context` required for: `chunk`, `claims`, `dedup`, `relevance`, `grounding`
 - `geval.metrics` required for: `geval_steps`, `geval`
 - `reference` required for: `reference`
 
@@ -252,7 +252,7 @@ Planned `/estimate` response shape:
   "target_node": "grounding",
   "scan": { "record_count": 10, "total_tokens": 12345 },
   "plan": {
-    "planned_nodes": ["scan", "chunk", "claims", "dedupe", "grounding"],
+    "planned_nodes": ["scan", "chunk", "claims", "dedup", "grounding"],
     "to_run_case_ids_by_node": {},
     "cached_case_ids_by_node": {},
     "skipped_case_ids_by_node": {}
@@ -272,7 +272,7 @@ Planned `/run` response shape:
   "results": [
     {
       "case_id": "eiffel-1",
-      "executed_nodes": ["scan", "chunk", "claims", "dedupe", "grounding"],
+      "executed_nodes": ["scan", "chunk", "claims", "dedup", "grounding"],
       "cached_nodes": [],
       "output": {}
     }

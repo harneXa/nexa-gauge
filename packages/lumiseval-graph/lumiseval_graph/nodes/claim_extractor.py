@@ -8,15 +8,19 @@ tracking are centralised.
 
 TODO: Tune the extraction prompt for domain-specific claim types.
 """
-
-from lumiseval_core.constants import DEFAULT_JUDGE_MODEL
-from lumiseval_core.types import Chunk, Claim, ClaimCostMeta, NodeCostBreakdown
 from pydantic import BaseModel, Field
 
+from lumiseval_core.constants import DEFAULT_JUDGE_MODEL, CLAIMS_PER_CHUNK, AVG_CLAIM_TOKENS, AVG_OUTPUT_TOKENS_JSON_VERDICT
+from lumiseval_core.types import Chunk, Claim, Item, ClaimArtifacts, CostEstimate
+from lumiseval_core.utils import _count_tokens, template_static_tokens
+
+
+
+from lumiseval_graph.nodes.base import BaseNode
 from lumiseval_graph.llm.gateway import get_llm
 from lumiseval_graph.llm.pricing import cost_usd, get_model_pricing
 from lumiseval_graph.log import get_node_logger
-from lumiseval_graph.nodes.metrics.token_utils import count_tokens, template_static_tokens
+
 
 log = get_node_logger("claims")
 
@@ -28,7 +32,7 @@ class _ClaimList(BaseModel):
     )
 
 
-class ClaimExtractorNode:
+class ClaimExtractorNode(BaseNode):
     """Extracts atomic factual claims from text chunks via the LLM Gateway."""
 
     node_name = "claims"
@@ -47,7 +51,7 @@ class ClaimExtractorNode:
 
     # Static (non-placeholder) token overhead shared by every call — computed
     # once at class definition time from the prompts above.
-    static_prompt_tokens: int = count_tokens(SYSTEM_PROMPT) + template_static_tokens(USER_PROMPT)
+    static_prompt_tokens: int = _count_tokens(SYSTEM_PROMPT) + template_static_tokens(USER_PROMPT)
 
     def __init__(self, model: str = DEFAULT_JUDGE_MODEL) -> None:
         self.model = model
@@ -55,7 +59,7 @@ class ClaimExtractorNode:
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} model={self.model!r}>"
 
-    def run(self, chunks: list[Chunk]) -> list[Claim]:
+    def run(self, chunks: list[Chunk]) -> ClaimArtifacts:  # type: ignore[override]
         """Extract atomic factual claims from all chunks via the LLM Gateway.
 
         Args:
@@ -66,15 +70,15 @@ class ClaimExtractorNode:
         """
         llm = get_llm("claims", _ClaimList, self.model)
         all_claims: list[Claim] = []
+        
 
+        cost = []
         for chunk in chunks:
-            log.info(f"chunk {chunk.index + 1}/{len(chunks)}  ({len(chunk.text)} chars)")
-
             messages = [
                 {"role": "system", "content": self.SYSTEM_PROMPT},
                 {
                     "role": "user",
-                    "content": self.USER_PROMPT.format(chunk_text=chunk.text),
+                    "content": self.USER_PROMPT.format(chunk_text=chunk.item.text),
                 },
             ]
             response = llm.invoke(messages)
@@ -83,78 +87,78 @@ class ClaimExtractorNode:
                 raise response["parsing_error"]
 
             result: _ClaimList = response["parsed"]
-            tokens = response["usage"]["total_tokens"]
-            n = len(result.claims)
-            log.info(
-                f"  → {n} claim(s) extracted from chunk {chunk.index}"
-                f"  (model={response['model']}  tokens={tokens})"
+
+            cost.append(
+                CostEstimate(
+                    input_tokens=response["usage"]["total_tokens"],
+                    output_tokens=response["usage"]["completion_tokens"],
+                    cost=(
+                        cost_usd(response["usage"]["total_tokens"], pricing, "input") + 
+                        cost_usd(response["usage"]["completion_tokens"], pricing, "output")
+                    )
+                )
             )
+            
+            n = len(result.claims)
 
             for claim_text, confidence in zip(result.claims, result.confidences):
+                claim_text = 
                 all_claims.append(
                     Claim(
-                        text=claim_text,
+                        item=Item(
+                            text=claim_text,
+                            tokens=_count_tokens(claim_text)
+                        ),
                         source_chunk_index=chunk.index,
                         confidence=confidence,
                     )
                 )
 
         valid = [c for c in all_claims if not c.extraction_failed or c.text]
+        claim_tokens = sum([cl.num_tokens for cl in valid])
         log.success(f"{len(valid)} total claim(s) across all chunks")
-        return valid
+        return ClaimArtifacts(
+            claims=valid,
+            cost=cost
+        )
 
     def cost_estimate(
         self,
-        *,
-        cost_meta: ClaimCostMeta,
-        **_ignored,
-    ) -> NodeCostBreakdown:
-        """Estimate LLM cost for claim extraction without running any calls.
-
-        Args:
-            eligible_records:      Records this node will process.
-            avg_chunks_per_record: Average number of chunks per record.
-            avg_chunk_tokens:      Average token count per chunk (input content).
-
-        Returns:
-            NodeCostBreakdown with judge_calls and cost_usd.
-        """
-        if cost_meta.eligible_records == 0:
-            return NodeCostBreakdown(model_calls=0, cost_usd=0.0)
-
+        input_tokens: float, # chunk_tokens
+        output_tokens: float
+    ) -> EstimatePayload: # type: ignore[override]
         pricing = get_model_pricing(self.model)
-        chunks_per_record = max(1.0, cost_meta.avg_generation_chunks)
-        total_calls = round(cost_meta.eligible_records * chunks_per_record)
 
-        input_tokens = self.static_prompt_tokens + cost_meta.avg_generation_tokens
+        input_tokens = self.static_prompt_tokens + input_tokens
         # One claim per chunk: claim text tokens + confidence float (JSON verdict overhead)
-        output_tokens = cost_meta.avg_claim_tokens + cost_meta.avg_output_token
+        output_tokens = claim_tokens + AVG_OUTPUT_TOKENS_JSON_VERDICT
 
         cost_per_call = cost_usd(input_tokens, pricing, "input") + cost_usd(
             output_tokens, pricing, "output"
         )
-        return NodeCostBreakdown(
-            model_calls=total_calls,
-            cost_usd=round(total_calls * cost_per_call, 6),
+        return EstimatePayload(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost=cost_per_call,
         )
 
-    @classmethod
-    def cost_formula(cls, cost_meta: ClaimCostMeta) -> str:
-        chunks = max(1.0, cost_meta.avg_generation_chunks)
-        total_calls = round(cost_meta.eligible_records * chunks)
-        prompt_t = cls.static_prompt_tokens
-        gen_t = round(cost_meta.avg_generation_tokens)
-        input_t = prompt_t + gen_t
-        out_claim = round(cost_meta.avg_claim_tokens)
-        out_verdict = round(cost_meta.avg_output_token)
-        output_t = out_claim + out_verdict
-        total_t = total_calls * (input_t + output_t)
-        return (
-            f"calls         = {total_calls}  ({cost_meta.eligible_records} recs × {chunks:.1f} chunks/rec)\n"
-            f"input_tokens  = {prompt_t} (prompt tokens) + {gen_t} (generation chunk tokens) = {input_t} tok/call\n"
-            f"output_tokens = {out_claim} (claim text tokens) + {out_verdict} (json verdict tokens) = {output_t} tok/call\n"
-            f"total_tokens  = {total_calls} × ({input_t} + {output_t}) = {total_t} tok"
-        )
+    # @classmethod
+    # def cost_formula(cls, cost_meta: ClaimEstimate) -> str:
+    #     chunks = max(1.0, cost_meta.avg_generation_chunks)
+    #     total_calls = round(cost_meta.eligible_records * chunks)
+    #     prompt_t = cls.static_prompt_tokens
+    #     gen_t = round(cost_meta.avg_generation_tokens)
+    #     input_t = prompt_t + gen_t
+    #     out_claim = round(cost_meta.avg_claim_tokens)
+    #     out_verdict = round(cost_meta.avg_output_token)
+    #     output_t = out_claim + out_verdict
+    #     total_t = total_calls * (input_t + output_t)
+    #     return (
+    #         f"calls         = {total_calls}  ({cost_meta.eligible_records} recs × {chunks:.1f} chunks/rec)\n"
+    #         f"input_tokens  = {prompt_t} (prompt tokens) + {gen_t} (generation chunk tokens) = {input_t} tok/call\n"
+    #         f"output_tokens = {out_claim} (claim text tokens) + {out_verdict} (json verdict tokens) = {output_t} tok/call\n"
+    #         f"total_tokens  = {total_calls} × ({input_t} + {output_t}) = {total_t} tok"
+    #     )
 
 
 # ── Manual smoke test ─────────────────────────────────────────────────────────
@@ -195,4 +199,4 @@ if __name__ == "__main__":
         pprint(c)
 
     print("\nCost estimate:")
-    pprint(node.cost_estimate(eligible_records=100, avg_chunks_per_record=2.0))
+    pprint(node.cost_estimate(chunk_count=len(chunks), chunk_tokens=50))

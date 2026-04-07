@@ -438,7 +438,7 @@ class CachedNodeRunner:
         estimator = CostEstimator(state["job_config"])
 
         # A plan may look like below
-        # plan: ['scan', 'chunk', 'claims', 'dedupe', 'relevance']
+        # plan: ['scan', 'chunk', 'claims', 'dedup', 'relevance']
         i = 0
         while i < len(plan):
             step = plan[i]

@@ -2,7 +2,7 @@
 LangGraph Orchestration Graph — the core evaluation pipeline.
 
 Node sequence:
-  scan → chunk → claims → dedupe →
+  scan → chunk → claims → dedup →
   geval_steps →
   [parallel: relevance, grounding, redteam, geval, reference] →
   eval → result
@@ -31,19 +31,20 @@ from lumiseval_core.types import (
     MetricResult,
 )
 from lumiseval_evidence.indexer import index_file
-from lumiseval_ingest.chunker import chunk_text
 from lumiseval_ingest.scanner import scan_cases
 
 from .llm import get_judge_model
 from .log import get_node_logger, print_pipeline_footer, print_pipeline_header
 from .nodes import claim_extractor, eval
-from .nodes.metrics.dedupe import DedupeNode
+from .nodes.chunk_extractor import ChunkExtractorNode
+from .nodes.dedup.node import DedupNode
 from .nodes.metrics.geval import GevalNode, GevalStepsNode
 from .nodes.metrics.grounding import GroundingNode
 from .nodes.metrics.redteam import RedteamNode
 from .nodes.metrics.reference import ReferenceNode
 from .nodes.metrics.relevance import RelevanceNode
 from .observability import observe, score_trace, update_trace
+from .scanner import scan as scan_record
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ logger = logging.getLogger(__name__)
 _log_scanner = get_node_logger("scan")
 _log_chunker = get_node_logger("chunk")
 _log_claims = get_node_logger("claims")
-_log_mmr = get_node_logger("dedupe")
+_log_mmr = get_node_logger("dedup")
 _log_ragas = get_node_logger("relevance")
 _log_hallucination = get_node_logger("grounding")
 _log_adversarial = get_node_logger("redteam")
@@ -64,88 +65,139 @@ _log_agg = get_node_logger("eval")
 # ── Graph state ────────────────────────────────────────────────────────────
 
 
-class EvalState(TypedDict):
-    # ── Inputs: set at graph entry, never mutated by nodes ────────────────
-    generation: str               # LLM output being evaluated; read by scan, chunk, redteam, reference
-    question: Optional[str]       # Original query; read by relevance for answer-relevancy scoring
-    reference: Optional[str]      # Ground-truth answer; read by scan (eligibility flag) and reference node (ROUGE/BLEU/METEOR)
-    context: Optional[list[str]]  # Retrieved passages; gates chunk → claims → grounding path; read by grounding
-    geval: Optional[GevalConfig]  # Canonical GEval contract; gates geval_steps/geval nodes
+# class EvalState(TypedDict):
+#     # ── Inputs: set at graph entry, never mutated by nodes ────────────────
+#     generation: str               # LLM output being evaluated; read by scan, chunk, redteam, reference
+#     question: Optional[str]       # Original query; read by relevance for answer-relevancy scoring
+#     reference: Optional[str]      # Ground-truth answer; read by scan (eligibility flag) and reference node (ROUGE/BLEU/METEOR)
+#     context: Optional[list[str]]  # Retrieved passages; gates chunk → claims → grounding path; read by grounding
+#     geval: Optional[GevalConfig]  # Canonical GEval contract; gates geval_steps/geval nodes
 
 
-    target_node: Optional[str]    # Pipeline stop point used by CachedNodeRunner
-    reference_files: list[str]    # File paths indexed into LanceDB before the graph runs (in run_graph, not inside nodes)
-    job_config: EvalJobConfig     # Controls enable_* flags, judge_model, job_id; read by every node
+#     target_node: Optional[str]    # Pipeline stop point used by CachedNodeRunner
+#     reference_files: list[str]    # File paths indexed into LanceDB before the graph runs (in run_graph, not inside nodes)
+#     job_config: EvalJobConfig     # Controls enable_* flags, judge_model, job_id; read by every node
 
-    # ── Intermediate: written by one node, consumed by downstream nodes ───
-    metadata: Optional[InputMetadata]      # Token/eligibility stats; written by scan
-    cost_estimate: Optional[CostEstimate]  # Optional pre-run cost breakdown; injected by caller/runner for eval
-    chunks: list[Chunk]                    # Generation split into ~512-token chunks; written by chunk, read by claims
-    raw_claims: list[Claim]                # Atomic claims extracted per chunk; written by claims, read by dedupe
-    unique_claims: list[Claim]             # MMR-deduplicated claims; written by dedupe, read by relevance and grounding
-    geval_steps_by_signature: dict[str, list[str]]  # Signature-keyed evaluation steps; written by geval_steps
+#     # ── Intermediate: written by one node, consumed by downstream nodes ───
+#     metadata: Optional[InputMetadata]      # Token/eligibility stats; written by scan
+#     cost_estimate: Optional[CostEstimate]  # Optional pre-run cost breakdown; injected by caller/runner for eval
+#     chunks: list[Chunk]                    # Generation split into ~512-token chunks; written by chunk, read by claims
+#     raw_claims: list[Claim]                # Atomic claims extracted per chunk; written by claims, read by dedup
+#     unique_claims: list[Claim]             # MMR-deduplicated claims; written by dedup, read by relevance and grounding
+#     geval_steps_by_signature: dict[str, list[str]]  # Signature-keyed evaluation steps; written by geval_steps
 
-    # ── Metric results: written by parallel metric nodes, aggregated by eval ─
-    grounding_metrics: list[MetricResult]  # Faithfulness verdicts per claim; written by grounding
-    relevance_metrics: list[MetricResult]  # Answer-relevancy verdicts per claim; written by relevance
-    redteam_metrics: list[MetricResult]    # Bias + toxicity scores; written by redteam
-    geval_metrics: list[MetricResult]      # Authoritative GEval scoring branch; written by geval
-    reference_metrics: list[MetricResult]  # ROUGE/BLEU/METEOR scores; written by reference
+#     # ── Metric results: written by parallel metric nodes, aggregated by eval ─
+#     grounding_metrics: list[MetricResult]  # Faithfulness verdicts per claim; written by grounding
+#     relevance_metrics: list[MetricResult]  # Answer-relevancy verdicts per claim; written by relevance
+#     redteam_metrics: list[MetricResult]    # Bias + toxicity scores; written by redteam
+#     geval_metrics: list[MetricResult]      # Authoritative GEval scoring branch; written by geval
+#     reference_metrics: list[MetricResult]  # ROUGE/BLEU/METEOR scores; written by reference
 
-    # ── Output ────────────────────────────────────────────────────────────
-    cost_actual_usd: float         # Actual LLM spend (currently always 0.0 — TODO: wire up token tracking)
-    report: Optional[EvalReport]   # Final aggregated report; written by eval, returned by run_graph and written to --output-dir
-    error: Optional[str]           # Pipeline error message; checked by run_graph to raise RuntimeError (unused today)
+#     # ── Output ────────────────────────────────────────────────────────────
+#     cost_actual_usd: float         # Actual LLM spend (currently always 0.0 — TODO: wire up token tracking)
+#     report: Optional[EvalReport]   # Final aggregated report; written by eval, returned by run_graph and written to --output-dir
+#     error: Optional[str]           # Pipeline error message; checked by run_graph to raise RuntimeError (unused today)
 
 
 # ── Node implementations ───────────────────────────────────────────────────
 
 
+class RecordMetadata(TypedDict):
+    case_id: Optional[str]  
+    question: Optional[str]
+    generation: Optional[str]
+    reference: Optional[str]
+    context: Optional[str]
+    geval: Optional[Dict]
+
+class EvalCase(TypedDict):
+    """Canonical dataset row used by adapters and dataset runners."""
+    case_id: str
+    dataset: str = DEFAULT_DATASET_NAME
+    split: str = DEFAULT_SPLIT
+    reference_files: list[str] = Field(default_factory=list)
+    record: Dict[str, Any]
+
+    # INPUTS:
+    inputs: Optional[Inputs]
+    # metadata: dict[str, Any] = Field(default_factory=dict)
+
+    generation_chunk: Optional[ChunkArtifacts]
+    generation_claims: Optional[ClaimArtifacts]
+    generation_dedup_claims: Optional[ClaimArtifacts]
+    grounding_metrics: Optional[GroundingMetrics]
+    relevance_metrics: Optional[RelevanceMetrics]
+    redteam_metrics: Optional[RedteamMetrics]
+    geval_steps: Optional[GevalStepsArtifacts]
+    geval_metrics: Optional[GevalMetrics]
+    reference_metrics: Optional[ReferenceMetrics]
+    # eval_metrics: list[MetricResult]
+
 @observe(name="node_scan")
-def node_metadata_scanner(state: EvalState) -> dict:
-    case = EvalCase(
-        case_id="runtime-case",
-        generation=state["generation"],
-        question=state.get("question"),
-        reference=state.get("reference"),
-        context=state.get("context") or [],
-        geval=state.get("geval"),
-    )
-    meta = scan_cases([case], show_progress=False)
-    return {"metadata": meta}
+def node_metadata_scanner(state: dict[str, Any]) -> dict[str, Any]:
+    """
+    In LangGraph, each node gets the current full state snapshot.
+    So after node_metadata_scanner returns {"inputs": ...}, that patch is merged into state, and downstream nodes like node_chunk receive the same full state with
+    inputs included.
+
+    Important in your current file:
+
+    - node_chunk still reads state["generation"], not state["inputs"].
+    - So inputs is available downstream, but node_chunk won’t use it unless you change it.
+    """
+    # Per-record scan only: hydrate `inputs` from the current state payload.
+    geval_raw = state.get("geval")
+    if hasattr(geval_raw, "model_dump"):
+        geval_raw = geval_raw.model_dump()
+
+    raw_record = {
+        "case_id": state.get("case_id") or "record-0",
+        "generation": state.get("generation"),
+        "question": state.get("question"),
+        "reference": state.get("reference"),
+        "context": state.get("context"),
+        "geval": geval_raw,
+        "reference_files": state.get("reference_files") or [],
+    }
+
+    case = scan_record(raw_record, idx=0)
+    return {"inputs": case.get("inputs")}
 
 
-@observe(name="node_chunk")
-def node_chunk(state: EvalState) -> dict:
-    if not state.get("generation"):
-        return {"chunks": []}
-    chunks = chunk_text(
-        state["generation"],
-        chunk_size=state["job_config"].chunk_size
-    )
-    return {"chunks": chunks}
+@observe(name="node_generation_chunk")
+def node_generation_chunk(state: EvalCase) -> EvalCase:
+    if not state["inputs"].generation:
+        return {"generation_chunk": None}
+    text = state["inputs"].generation.text
+    chunks: ChunkArtifacts = ChunkExtractorNode(
+        chunk_size=GENERATION_CHUNK_SIZE_TOKENS
+    ).run(record=text)
+    return {"generation_chunk": chunks}
 
 
-@observe(name="node_claims")
-def node_claims(state: EvalState) -> dict:
-    if not state.get("generation") or not state.get("chunks"):
-        return {"raw_claims": []}
+@observe(name="node_generation_claims")
+def node_generation_claims(state: EvalCase) -> EvalCase:
+    if not state["inputs"].generation or not state.get("generation_chunk"):
+        return {"generation_claims": None}
     model = state["job_config"].judge_model
-    claims = claim_extractor.ClaimExtractorNode(model=model).run(state["chunks"])
-    return {"raw_claims": claims}
+    claims = claim_extractor.ClaimExtractorNode(model=model).run(
+        state["generation_chunk"].chunks
+    )
+    return {"generation_claims": claims}
 
 
-@observe(name="node_dedupe")
-def node_dedupe(state: EvalState) -> dict:
-    raw = state["raw_claims"]
-    if not raw:
-        return {"unique_claims": []}
-    unique = DedupeNode(strategy="mmr").run(claims=raw)
-    return {"unique_claims": unique}
+@observe(name="node_dedup")
+def node_generation_claims_dedup(state: EvalCase) -> EvalCase:
+    if not state["generation_claims"]:
+        return {"generation_dedup_claims": None}
+    unique_items: list[Item], dedup_map: dict[int, int] = DedupNode().run(items=state["generation_claims"].claims)
+    selected_ids = set(dedup_map.values())
+    claims = [claim in for claim in claims if claim.id in selected_ids]
+    return {"generation_dedup_claims": claims}
 
 
 @observe(name="node_geval_steps")
-def node_geval_steps(state: EvalState) -> dict:
+def node_geval_steps(state: EvalCase) -> EvalCase:
     geval_cfg = state["geval"]
     metrics = geval_cfg.metrics if geval_cfg is not None else []
     if not state["job_config"].enable_geval or not metrics:
@@ -157,7 +209,7 @@ def node_geval_steps(state: EvalState) -> dict:
 
 
 @observe(name="node_relevance")
-def node_relevance(state: EvalState) -> dict:
+def node_relevance(state: EvalCase) -> EvalCase:
     claims = state.get("unique_claims") or []
     if not claims:
         return {"relevance_metrics": []}
@@ -173,7 +225,7 @@ def node_relevance(state: EvalState) -> dict:
 
 
 @observe(name="node_grounding")
-def node_grounding(state: EvalState) -> dict:
+def node_grounding(state: EvalCase) -> EvalCase:
     claims = state.get("unique_claims") or []
     context = state["context"]
     if not claims or not context:
@@ -190,7 +242,7 @@ def node_grounding(state: EvalState) -> dict:
 
 
 @observe(name="node_redteam")
-def node_adversarial(state: EvalState) -> dict:
+def node_adversarial(state: EvalCase) -> EvalCase:
     if not state["job_config"].enable_redteam:
         return {"redteam_metrics": []}
     model = get_judge_model("redteam", state["job_config"].judge_model)
@@ -199,7 +251,7 @@ def node_adversarial(state: EvalState) -> dict:
 
 
 @observe(name="node_geval")
-def node_geval(state: EvalState) -> dict:
+def node_geval(state: EvalCase) -> EvalCase:
     geval_cfg = state["geval"]
     metrics = geval_cfg.metrics if geval_cfg is not None else []
     if not state["job_config"].enable_geval or not metrics:
@@ -218,7 +270,7 @@ def node_geval(state: EvalState) -> dict:
 
 
 @observe(name="node_reference")
-def node_reference(state: EvalState) -> dict:
+def node_reference(state: EvalCase) -> EvalCase:
     if not state["job_config"].enable_reference:
         return {"reference_metrics": []}
     reference = state.get("reference")
@@ -233,7 +285,7 @@ def node_reference(state: EvalState) -> dict:
 
 
 @observe(name="node_eval")
-def node_eval(state: EvalState) -> dict:
+def node_eval(state: EvalCase) -> EvalCase:
     report = eval.aggregate(
         job_id=state["job_config"].job_id,
         grounding_metrics=state.get("grounding_metrics") or [],
@@ -252,12 +304,12 @@ def node_eval(state: EvalState) -> dict:
 
 
 def build_graph() -> StateGraph:
-    g = StateGraph(EvalState)
+    g = StateGraph(EvalCase)
 
     g.add_node("scan", node_metadata_scanner)
     g.add_node("chunk", node_chunk)
     g.add_node("claims", node_claims)
-    g.add_node("dedupe", node_dedupe)
+    g.add_node("dedup", node_dedup)
     g.add_node("geval_steps", node_geval_steps)
     g.add_node("relevance", node_relevance)
     g.add_node("grounding", node_grounding)
@@ -272,10 +324,10 @@ def build_graph() -> StateGraph:
     g.add_edge("scan", "redteam")
     g.add_edge("scan", "reference")
     g.add_edge("chunk", "claims")
-    g.add_edge("claims", "dedupe")
+    g.add_edge("claims", "dedup")
     g.add_edge("geval_steps", "geval")
-    g.add_edge("dedupe", "relevance")
-    g.add_edge("dedupe", "grounding")
+    g.add_edge("dedup", "relevance")
+    g.add_edge("dedup", "grounding")
     g.add_edge("relevance", "eval")
     g.add_edge("grounding", "eval")
     g.add_edge("redteam", "eval")

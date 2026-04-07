@@ -93,7 +93,7 @@ def test_redteam_and_geval_do_not_depend_on_claims_branch() -> None:
     for plan in (redteam_plan, geval_plan):
         assert "chunk" not in plan
         assert "claims" not in plan
-        assert "dedupe" not in plan
+        assert "dedup" not in plan
     assert geval_plan == ["scan", "geval_steps"]
 
 
@@ -102,7 +102,7 @@ def test_topology_no_longer_includes_estimate_or_approve_nodes() -> None:
     assert "approve" not in NODE_ORDER
     assert list(NODES_BY_NAME["chunk"].prerequisites) == ["scan"]
     assert list(NODES_BY_NAME["claims"].prerequisites) == ["scan", "chunk"]
-    assert list(NODES_BY_NAME["dedupe"].prerequisites) == ["scan", "chunk", "claims"]
+    assert list(NODES_BY_NAME["dedup"].prerequisites) == ["scan", "chunk", "claims"]
     assert list(NODES_BY_NAME["geval_steps"].prerequisites) == ["scan"]
     assert list(NODES_BY_NAME["geval"].prerequisites) == ["scan", "geval_steps"]
     assert list(NODES_BY_NAME["redteam"].prerequisites) == ["scan"]
@@ -260,13 +260,13 @@ def test_disabled_nodes_have_zero_cost() -> None:
         assert report.row(node).model_calls == 0, f"{node} should be zero cost when disabled"
 
 
-def test_dedupe_has_zero_individual_llm_cost() -> None:
+def test_dedup_has_zero_individual_llm_cost() -> None:
     cfg = EvalJobConfig(job_id="j5b", enable_grounding=True, enable_relevance=False)
     report = CostEstimator(cfg).estimate(_meta())
-    row = report.row("dedupe")
+    row = report.row("dedup")
 
     assert row.individual_cost_usd == 0.0
-    # Cumulative dedupe cost still includes upstream claim extraction when enabled.
+    # Cumulative dedup cost still includes upstream claim extraction when enabled.
     assert row.cost_usd == report.row("claims").cost_usd
 
 
