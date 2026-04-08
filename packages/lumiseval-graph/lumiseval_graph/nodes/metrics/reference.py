@@ -8,21 +8,20 @@ Returns one MetricResult per metric: ROUGE-1, ROUGE-2, ROUGE-L, BLEU, METEOR.
 All scores are in the 0.0–1.0 range where 1.0 is best.
 """
 
-from typing import Optional
-
 import nltk
 from lumiseval_core.types import (
+    CostEstimate,
     MetricCategory,
     MetricResult,
-    NodeCostBreakdown,
-    ReferenceCostMeta,
+    ReferenceMetrics,
+    Item,
 )
 from nltk.translate.bleu_score import SmoothingFunction, sentence_bleu
 from nltk.translate.meteor_score import meteor_score
 from rouge_score import rouge_scorer
 
 from lumiseval_graph.log import get_node_logger
-from lumiseval_graph.nodes.metrics.base import BaseMetricNode
+from lumiseval_graph.nodes.base import BaseMetricNode
 
 log = get_node_logger("reference")
 
@@ -83,62 +82,41 @@ class ReferenceNode(BaseMetricNode):
 
     def run(  # type: ignore[override]
         self,
-        *,
-        generation: str,
-        reference: Optional[str],
+        generation: Item | str,
+        reference: Item | str | None,
         enable_generation_metrics: bool = True,
-    ) -> list[MetricResult]:
-        """Compute ROUGE, BLEU, and METEOR scores; return empty list when reference is absent."""
+    ) -> ReferenceMetrics:
+        """Compute ROUGE, BLEU, and METEOR scores against reference text."""
+        zero_cost = CostEstimate(cost=0.0, input_tokens=None, output_tokens=None)
         if not enable_generation_metrics:
-            return []
-        if not reference:
+            return ReferenceMetrics(metrics=[], cost=zero_cost)
+
+        generation_text = generation.text if isinstance(generation, Item) else (generation or "")
+        if isinstance(reference, Item):
+            reference_text = reference.text
+        else:
+            reference_text = reference or ""
+
+        if not reference_text.strip():
             log.info("No reference provided — skipping reference metrics")
-            return []
+            return ReferenceMetrics(metrics=[], cost=zero_cost)
 
         results: list[MetricResult] = []
-        results.extend(self._compute_rouge(generation, reference))
-        results.append(self._compute_bleu(generation, reference))
-        results.append(self._compute_meteor(generation, reference))
-        return results
+        results.extend(self._compute_rouge(generation_text, reference_text))
+        results.append(self._compute_bleu(generation_text, reference_text))
+        results.append(self._compute_meteor(generation_text, reference_text))
+        return ReferenceMetrics(
+            metrics=results,
+            cost=zero_cost,
+        )
 
     def cost_estimate(
         self,
-        *,
-        cost_meta: ReferenceCostMeta,
-        **_ignored,
-    ) -> NodeCostBreakdown:
+        input_tokens: float = 0.0,
+        output_tokens: float = 0.0,
+    ) -> CostEstimate:
         """No LLM calls — cost is always $0."""
-        return NodeCostBreakdown(model_calls=0, cost_usd=0.0)
+        return CostEstimate(cost=0.0, input_tokens=None, output_tokens=None)
 
-
-# ── Manual smoke test ─────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    """
-    Smoke test with a near-perfect match and a partial match.
-
-    Expected: near-perfect case → high scores; partial case → lower scores.
-    """
-    from pprint import pprint
-
-    node = ReferenceNode()
-    print(repr(node))
-
-    generation = (
-        "The Eiffel Tower is a wrought-iron lattice tower on the Champ de Mars "
-        "in Paris, France, built between 1887 and 1889."
-    )
-    reference = (
-        "The Eiffel Tower is a wrought-iron lattice tower on the Champ de Mars "
-        "in Paris, France, built between 1887 and 1889 as the entrance arch for "
-        "the 1889 World's Fair."
-    )
-
-    print("\n── Near-match case ──")
-    results = node.run(generation=generation, reference=reference)
-    for r in results:
-        pprint(r)
-
-    print("\n── No reference case ──")
-    results = node.run(generation=generation, reference=None)
-    print(f"results: {results!r}  (expected [])")
+    def estimate(self, input_tokens: float = 0.0, output_tokens: float = 0.0) -> CostEstimate:  # type: ignore[override]
+        return self.cost_estimate(input_tokens=input_tokens, output_tokens=output_tokens)

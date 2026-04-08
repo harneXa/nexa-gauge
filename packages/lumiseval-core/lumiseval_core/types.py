@@ -154,8 +154,6 @@ class GevalStepsResolved(BaseModel):
     steps_source: Literal["provided", "generated", "cache_used"]
     signature: str | None = None
 
-
-
 class GevalStepsArtifacts(BaseModel):
     resolved_steps: list[GevalStepsResolved] = Field(default_factory=list)
     cost: CostEstimate | None = None

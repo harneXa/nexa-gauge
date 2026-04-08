@@ -19,6 +19,8 @@ from lumiseval_core.types import (
 )
 from lumiseval_core.utils import _count_tokens
 
+_GEVAL_ITEM_FIELDS = {"question", "generation", "reference", "context"}
+
 
 class GraphEvalCase(TypedDict, total=False):
     """Lightweight graph-side EvalCase shape used by this scanner."""
@@ -71,11 +73,15 @@ def _build_geval(raw_geval: Any) -> Geval | None:
         if not name:
             continue
 
-        record_fields_raw = metric_raw.get("record_fields")
-        if isinstance(record_fields_raw, list) and record_fields_raw:
-            record_fields = [str(field) for field in record_fields_raw]
-        else:
-            record_fields = ["generation"]
+        raw_item_fields = metric_raw.get("item_fields")
+        item_fields: list[str] = []
+        if isinstance(raw_item_fields, list):
+            for field in raw_item_fields:
+                normalized_field = _normalize_text(field)
+                if normalized_field in _GEVAL_ITEM_FIELDS:
+                    item_fields.append(normalized_field)
+        if not item_fields:
+            item_fields = ["generation"]
 
         criteria_text = _normalize_text(metric_raw.get("criteria"))
         criteria = (
@@ -104,7 +110,7 @@ def _build_geval(raw_geval: Any) -> Geval | None:
         metrics.append(
             GevalMetricInput(
                 name=name,
-                record_fields=record_fields,
+                item_fields=item_fields,
                 criteria=criteria,
                 evaluation_steps=steps,
             )

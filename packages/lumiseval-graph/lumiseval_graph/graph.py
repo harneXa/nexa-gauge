@@ -42,7 +42,7 @@ from .llm import get_judge_model
 from .log import get_node_logger, print_pipeline_footer, print_pipeline_header
 from .nodes import claim_extractor, eval
 from .nodes.chunk_extractor import ChunkExtractorNode
-from .nodes.dedupe import DedupNode
+from .nodes.dedup import DedupNode
 from .nodes.metrics.geval import GevalNode, GevalStepsNode
 from .nodes.metrics.grounding import GroundingNode
 from .nodes.metrics.redteam import RedteamNode
