@@ -109,6 +109,15 @@ class Inputs(BaseModel):
     has_context: bool = False
     has_geval: bool = False
 
+    @model_validator(mode="after")
+    def _set_has_flags(self) -> "Inputs":
+        self.has_generation = self.generation is not None
+        self.has_question = self.question is not None
+        self.has_reference = self.reference is not None
+        self.has_context = self.context is not None
+        self.has_geval = self.geval is not None
+        return self
+
 
 class CostEstimate(BaseModel):
     cost: float

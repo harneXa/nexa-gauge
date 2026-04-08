@@ -20,8 +20,9 @@ from typing import Any, NotRequired, Optional, TypedDict, cast
 from langgraph.graph import END, StateGraph
 from lumiseval_core.config import config as cfg
 from lumiseval_core.constants import DEFAULT_DATASET_NAME, DEFAULT_SPLIT
-from lumisenoval_core.types import (
+from lumiseval_core.types import (
     ChunkArtifacts,
+    Claim,
     ClaimArtifacts,
     CostEstimate,
     DedupArtifacts,
@@ -32,7 +33,7 @@ from lumisenoval_core.types import (
     Inputs,
     Item,
     MetricResult,
-    ReferencePayload,
+    ReferenceMetrics,
     RedteamMetrics,
     RelevanceMetrics,
 )
@@ -72,14 +73,6 @@ class EvalCase(TypedDict):
     """Canonical dataset row used by adapters and dataset runners."""
     # Required
     case_id: str
-    record: dict[str, Any]
-
-    # Optional with defaults handled at construction time
-    dataset: NotRequired[str]          # default: DEFAULT_DATASET_NAME
-    split: NotRequired[str]            # default: DEFAULT_SPLIT
-    job_id: NotRequired[str]           # default: uuid4
-    reference_files: NotRequired[list[str]]
-
     # Pipeline inputs
     inputs: Optional[Inputs]
 
@@ -92,7 +85,7 @@ class EvalCase(TypedDict):
     redteam_metrics: Optional[RedteamMetrics]
     geval_steps: Optional[GevalStepsArtifacts]
     geval_metrics: Optional[GevalMetrics]
-    reference_metrics: Optional[ReferencePayload]
+    reference_metrics: Optional[ReferenceMetrics]
 
 
 @observe(name="node_scan")
@@ -148,14 +141,23 @@ def node_generation_claims(state: EvalCase) -> EvalCase:
     return {"generation_claims": claims}
 
 
-@observe(name="node_dedup")
+@observe(name="node_generation_claims_dedup")
 def node_generation_claims_dedup(state: EvalCase) -> EvalCase:
     if not state["generation_claims"]:
         return {"generation_dedup_claims": None}
     unique_items, dedup_map = DedupNode().run(items=state["generation_claims"].claims)
     selected_ids = set(dedup_map.values())
-    claims = [claim for claim in claims if claim.id in selected_ids]
-    return {"generation_dedup_claims": claims}
+
+    claims = []
+    costs = []
+    for claim, cost in zip(
+        state["generation_claims"].claims, state["generation_claims"].cost
+    ):
+        if claim.id in selected_ids:
+            claims.append(claim)
+            costs.append(cost)
+
+    return {"generation_dedup_claims": ClaimArtifacts(claims=claims, cost=costs)}
 
 
 @observe(name="node_grounding")
@@ -195,12 +197,12 @@ def node_redteam(state: EvalCase) -> EvalCase:
 
 @observe(name="node_geval_steps")
 def node_geval_steps(state: EvalCase) -> EvalCase:
-    geval_cfg = state["input"].geval
+    geval_cfg = state["inputs"].geval
     metrics = geval_cfg.metrics if geval_cfg is not None else []
     if not state["inputs"].enable_geval or not metrics:
         return {"geval_steps_by_signature": {}}
 
-    model = get_judge_model("geval_steps", state["job_config"].judge_model)
+    model = get_judge_model("geval_steps")
     steps_by_signature = GevalStepsNode(judge_model=model).run(metrics=metrics)
     return {"geval_steps_by_signature": steps_by_signature}
 
@@ -208,12 +210,12 @@ def node_geval_steps(state: EvalCase) -> EvalCase:
 
 @observe(name="node_geval")
 def node_geval(state: EvalCase) -> EvalCase:
-    geval_cfg = state["geval"]
+    geval_cfg = state["inputs"].geval
     metrics = geval_cfg.metrics if geval_cfg is not None else []
-    if not state["job_config"].enable_geval or not metrics:
+    if not state["inputs"].enable_geval or not metrics:
         return {"geval_metrics": []}
 
-    model = get_judge_model("geval", state["judge_model"])
+    model = get_judge_model("geval")
     results = GevalNode(judge_model=model).run(
         metrics=metrics,
         generation=state.get("inputs").generation,
@@ -227,7 +229,7 @@ def node_geval(state: EvalCase) -> EvalCase:
 
 @observe(name="node_reference")
 def node_reference(state: EvalCase) -> EvalCase:
-    if not state["job_config"].enable_reference:
+    if not state["inputs"].enable_reference:
         return {"reference_metrics": []}
     reference = state.get("reference")
     if not reference:
@@ -243,7 +245,7 @@ def node_reference(state: EvalCase) -> EvalCase:
 @observe(name="node_eval")
 def node_eval(state: EvalCase) -> EvalCase:
     report = eval.aggregate(
-        job_id=state["job_config"].job_id,
+        job_id=state.get("job_id", ""),
         grounding_metrics=state.get("grounding_metrics") or [],
         relevance_metrics=state.get("relevance_metrics") or [],
         redteam_metrics=state.get("redteam_metrics") or [],
@@ -251,7 +253,6 @@ def node_eval(state: EvalCase) -> EvalCase:
         reference_metrics=state.get("reference_metrics") or [],
         cost_estimate=state.get("cost_estimate"),
         cost_actual_usd=state.get("cost_actual_usd", 0.0),
-        job_config=state["job_config"],
     )
     return {"report": report}
 
@@ -262,28 +263,28 @@ def node_eval(state: EvalCase) -> EvalCase:
 def build_graph() -> StateGraph:
     g = StateGraph(EvalCase)
 
-    g.add_node("scan", node_metadata_scanner)
+    g.add_node("metadata_scanner", node_metadata_scanner)
     g.add_node("generation_chunk", node_generation_chunk)
-    g.add_node("claims", node_claims)
-    g.add_node("dedup", node_dedup)
+    g.add_node("generation_claims", node_generation_claims)
+    g.add_node("generation_claims_dedup", node_generation_claims_dedup)
     g.add_node("geval_steps", node_geval_steps)
     g.add_node("relevance", node_relevance)
     g.add_node("grounding", node_grounding)
-    g.add_node("redteam", node_adversarial)
+    g.add_node("redteam", node_redteam)
     g.add_node("geval", node_geval)
     g.add_node("reference", node_reference)
     g.add_node("eval", node_eval)
 
-    g.set_entry_point("scan")
-    g.add_edge("scan", "chunk")
-    g.add_edge("scan", "geval_steps")
-    g.add_edge("scan", "redteam")
-    g.add_edge("scan", "reference")
-    g.add_edge("chunk", "claims")
-    g.add_edge("claims", "dedup")
+    g.set_entry_point("metadata_scanner")
+    g.add_edge("metadata_scanner", "generation_chunk")
+    g.add_edge("metadata_scanner", "geval_steps")
+    g.add_edge("metadata_scanner", "redteam")
+    g.add_edge("metadata_scanner", "reference")
+    g.add_edge("generation_chunk", "generation_claims")
+    g.add_edge("generation_claims", "generation_claims_dedup")
     g.add_edge("geval_steps", "geval")
-    g.add_edge("dedup", "relevance")
-    g.add_edge("dedup", "grounding")
+    g.add_edge("generation_claims_dedup", "relevance")
+    g.add_edge("generation_claims_dedup", "grounding")
     g.add_edge("relevance", "eval")
     g.add_edge("grounding", "eval")
     g.add_edge("redteam", "eval")
@@ -295,82 +296,77 @@ def build_graph() -> StateGraph:
 
 
 
-@observe(name="lumiseval_pipeline")
-def run_graph(
-    generation: str,
+
+def build_initial_state(
+    generation: str = None,
     question: Optional[str] = None,
     reference: Optional[str] = None,
     context: Optional[list[str]] = None,
-    geval: Optional[GevalConfig] = None,
+    geval: Optional[Any] = None,
     reference_files: Optional[list[str]] = None,
-    job_config: Optional[EvalJobConfig] = None,
-) -> EvalReport:
-    """Execute the full evaluation pipeline synchronously.
+) -> EvalCase:
 
-    Args:
-        generation: The LLM-generated text to evaluate.
-        job_config: Evaluation configuration. A default config is created if not provided.
-        question: Optional query that produced the generation (improves RAGAS scores).
-        reference: Optional reference answer (enables context recall).
-        context: Optional retrieval context passages for retrieval-path metrics.
-        geval: Optional GEval metric contract (canonical custom-judge path).
-        reference_files: Optional list of file paths to index before evaluation.
+    case_id = str(raw_record.get("case_id") or f"record-{uuid.uuid4().hex[:8]}")
+    judge_model = DEFAULT_JUDGE_MODEL
 
-    Returns:
-        EvalReport with retrieval_score, answer_score, composite_score, and per-claim verdicts.
-    """
-    initial_state = build_initial_state(
-        generation=generation,
-        job_config=job_config,
-        question=question,
-        reference=reference,
-        context=context,
-        geval=geval,
-        reference_files=reference_files,
-        target_node="eval",
-    )
-    job_config = initial_state["job_config"]
-
-    print_pipeline_header(
-        job_id=job_config.job_id,
-        model=job_config.judge_model,
-        web_search=job_config.web_search,
+    return EvalCase(
+        case_id=case_id,
+        inputs=Inputs(
+            generation=raw_record.get("generation"),
+            context=raw_record.get("context"),
+            question=raw_record.get("question"),
+            reference=raw_record.get("reference"),
+            geval=raw_record.get("geval")
+            
+        )
     )
 
-    # Index reference files into local LanceDB before graph runs
-    if reference_files:
-        _log_scanner.info(f"Indexing {len(reference_files)} reference file(s) into LanceDB")
 
-        for fpath in reference_files:
-            # try:
-            count = index_file(fpath)
-            _log_scanner.success(f"Indexed {count} passages from {fpath}")
-            # except Exception as exc:
-            #     _log_scanner.warning(f"Failed to index {fpath}: {exc}")
+@observe(name="lumiseval_pipeline")
+def run_graph(case: EvalCase) -> dict[str, Any]:
+    app = build_graph().compile()
+    return cast(dict[str, Any], app.invoke(case))
 
-    graph = build_graph().compile()
-    final_state = cast(EvalState, graph.invoke(cast(Any, initial_state)))
 
-    if final_state.get("error"):
-        raise RuntimeError(final_state["error"])
+def run_dataset(
+    input_path: str | Path,
+    *,
+    start_idx: int = 0,
+    end_idx: Optional[int] = None,
+    continue_on_error: bool = True,
+) -> list[dict[str, Any]]:
+    """Run one record at a time in sequence from a JSON file."""
+    raw = json.loads(Path(input_path).read_text(encoding="utf-8"))
+    records: list[dict[str, Any]]
+    if isinstance(raw, list):
+        records = cast(list[dict[str, Any]], raw)
+    elif isinstance(raw, dict):
+        records = [cast(dict[str, Any], raw)]
+    else:
+        raise ValueError("Input JSON must be an object or a list of objects")
 
-    report = final_state.get("report")
-    if report is None:
-        raise RuntimeError("Graph completed without an evaluation report.")
-    print_pipeline_footer(
-        composite_score=report.composite_score,
-        cost_usd=report.cost_actual_usd,
-    )
+    selected = records[start_idx:end_idx] if end_idx is not None else records[start_idx:]
+    app = build_graph().compile()
+    outputs: list[dict[str, Any]] = []
 
-    update_trace(
-        metadata={
-            "job_id": job_config.job_id,
-            "judge_model": job_config.judge_model,
-            "cost_actual_usd": report.cost_actual_usd,
-            "warnings": report.warnings,
-        }
-    )
-    if report.composite_score is not None:
-        score_trace("composite_score", report.composite_score)
+    for offset, record in enumerate(selected):
+        idx = start_idx + offset
+        state = build_initial_state(record=record)
+        try:
+            final_state = cast(dict[str, Any], app.invoke(state))
+            outputs.append(final_state)
+        except Exception as exc:
+            if not continue_on_error:
+                raise
+            outputs.append(
+                {
+                    "case_id": record.get("case_id", f"record-{idx}"),
+                    "error": str(exc),
+                    "record_index": idx,
+                }
+            )
 
-    return report
+    return outputs
+
+if __name__ == "__main__":
+    run_dataset(input_path="data/sample.json", start_idx=0, end_idx=1)

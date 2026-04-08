@@ -16,7 +16,6 @@ from typing import Optional
 
 from lumiseval_core.types import (
     CostEstimate,
-    EvalJobConfig,
     EvalReport,
     MetricCategory,
     MetricResult,
@@ -43,7 +42,6 @@ def aggregate(
     reference_metrics: list[MetricResult],
     cost_estimate: Optional[CostEstimate],
     cost_actual_usd: float,
-    job_config: EvalJobConfig,
 ) -> EvalReport:
     """Assemble all metric results into a final EvalReport."""
     warnings: list[str] = []
