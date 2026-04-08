@@ -5,7 +5,14 @@ remains stable and interpretable. Keep evaluation steps aligned to the same
 dimension instead of mixing unrelated checks in a single metric.
 """
 
-from lumiseval_graph.nodes.metrics.geval.score import GevalNode
 from lumiseval_graph.nodes.metrics.geval.steps import GevalStepsNode
 
 __all__ = ["GevalNode", "GevalStepsNode"]
+
+
+def __getattr__(name: str):
+    if name == "GevalNode":
+        from lumiseval_graph.nodes.metrics.geval.score import GevalNode
+
+        return GevalNode
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
