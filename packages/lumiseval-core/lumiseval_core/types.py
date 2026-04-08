@@ -53,7 +53,7 @@ class MetricCategory(str, Enum):
 # ── Core domain models ─────────────────────────────────────────────────────
 
 
-_ALLOWED_GEVAL_RECORD_FIELDS = {"question", "generation", "reference", "context"}
+_ALLOWED_GEVAL_Item_FIELDS = {"question", "generation", "reference", "context"}
 
 
 
@@ -63,12 +63,13 @@ _ALLOWED_GEVAL_RECORD_FIELDS = {"question", "generation", "reference", "context"
 # ------------------------------------------------------------
 
 
-GevalRecordField = Literal["question", "generation", "reference", "context"]
+GevalItemField = Literal["question", "generation", "reference", "context"]
 
 class Item(BaseModel):
     id: str = ""
     text: str
     tokens: float
+    confidence: float = 1.0
     cached: bool = False
 
     def model_post_init(self, __context: Any) -> None:
@@ -76,14 +77,14 @@ class Item(BaseModel):
             self.id = hashlib.sha256(self.text.encode("utf-8")).hexdigest()[:16]
 
 class GevalMetricInput(BaseModel):
-    """Input carried by a metric per record"""
+    """Input carried by a metric per Item"""
     name: str
-    record_fields: list[GevalRecordField] = Field(default_factory=lambda: ["generation"])
-    criteria: Record | None = None
-    evaluation_steps: list[Record] 
+    item_fields: list[GevalItemField] = Field(default_factory=lambda: ["generation"])
+    criteria: Item | None = None
+    evaluation_steps: list[Item] 
 
 class Geval(BaseModel):
-    """Input contract carried by record input payload."""
+    """Input contract carried by Item input payload."""
     metrics: list[GevalMetricInput] = Field(default_factory=list)
 
 class Chunk(BaseModel):
@@ -94,18 +95,32 @@ class Chunk(BaseModel):
     sha256: str
 
 class Claim(BaseModel):
-    item: Items
+    item: Item
     source_chunk_index: Optional[int] = None
     confidence: float = 1.0
     extraction_failed: bool = False
 
 
+class MetricResult(BaseModel):
+    name: str
+    category: MetricCategory
+    score: float | None = None
+    result: list[Any] | None = None
+    error: str | None = None
+
+
+class Faithfulness(Claim):
+    verdict: Literal["ACCEPTED", "REJECTED"]
+
+
+class Relevancy(Claim):
+    verdict: Literal["relevant", "irrelevant", "idk"]
 
 class Inputs(BaseModel):
-    generation: Record
-    question: Optional[Record] = None
-    reference: Optional[Record] = None
-    context: Optional[Record] = None
+    generation: Item
+    question: Optional[Item] = None
+    reference: Optional[Item] = None
+    context: Optional[Item] = None
     geval: Optional[Geval] = None
 
     has_generation: bool = False
@@ -117,8 +132,8 @@ class Inputs(BaseModel):
 
 class CostEstimate(BaseModel):
     cost: float
-    input_tokens: float
-    output_tokens: float
+    input_tokens: Optional[float] = None
+    output_tokens: Optional[float] = None
 
 # -----
 # NODES Essentials
@@ -132,7 +147,7 @@ class ClaimArtifacts(BaseModel):
     cost: list[CostEstimate]
 
 class DedupArtifacts(BaseModel):
-    items: list[Record]
+    items: list[Item]
     dropped: int
     dedup_map: dict[int, int]
     cost: CostEstimate
@@ -151,12 +166,12 @@ class RedteamMetrics(BaseModel):
 
 
 class GevalStepsResolved(BaseModel):
-    """This is per metric per record."""
+    """This is per metric per Item."""
     key: str
     name: str
-    record_fields: list[GevalRecordField]
-    evaluation_steps: list[GevalEvaluationStep]
-    steps_source: Literal["provided", "generated"]
+    item_fields: list[GevalItemField]
+    evaluation_steps: list[Item]
+    steps_source: Literal["provided", "generated", "cache_used"]
     signature: str | None = None
 
 
@@ -179,4 +194,3 @@ class ReferencePayload(BaseModel):
 class EvalPayload(BaseModel):
     metrics: list[MetricResult]
     cost: CostEstimate
-

@@ -1,8 +1,4 @@
-"""GEval steps node.
-
-Consumes `EvalCase` and resolves mixed GEval metric inputs into canonical
-`effective_steps` consumed by GEval scoring.
-"""
+"""GEval steps node."""
 
 from __future__ import annotations
 
@@ -10,19 +6,24 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from lumiseval_core.geval_cache import (
+from lumiseval_core.types import (
+    CostEstimate,
+    GevalMetricInput,
+    GevalStepsArtifacts,
+    GevalStepsResolved,
+    Item,
+)
+from lumiseval_core.utils import _count_tokens, template_static_tokens
+from lumiseval_graph.llm.gateway import get_llm
+from lumiseval_graph.llm.pricing import cost_usd, get_model_pricing
+from lumiseval_graph.log import get_node_logger
+from lumiseval_graph.nodes.base import BaseMetricNode
+from lumiseval_graph.nodes.metrics.geval.cache import (
     GEVAL_STEPS_PARSER_VERSION,
     GEVAL_STEPS_PROMPT_VERSION,
     GevalArtifactCache,
     compute_geval_signature,
 )
-from lumiseval_core.types import EvalCase, GevalMetricInput, GevalMetricResolved, GevalStepsPayload
-
-from lumiseval_graph.llm.gateway import get_llm
-from lumiseval_graph.llm.pricing import cost_usd, get_model_pricing
-from lumiseval_graph.log import get_node_logger
-from lumiseval_graph.nodes.base import BaseMetricNode
-from lumiseval_core.utils import _count_tokens, template_static_tokens
 
 log = get_node_logger("geval_steps")
 
@@ -32,8 +33,6 @@ class _GevalStepsResponse(BaseModel):
 
 
 class GevalStepsNode(BaseMetricNode):
-    """Resolve each metric to deterministic `effective_steps`."""
-
     node_name = "geval_steps"
     prompt_version = GEVAL_STEPS_PROMPT_VERSION
     parser_version = GEVAL_STEPS_PARSER_VERSION
@@ -43,7 +42,7 @@ class GevalStepsNode(BaseMetricNode):
         "Evaluation criteria:\n"
         "{criteria}\n\n"
         "Return 2-3 concrete, measurable evaluation steps as JSON:\n"
-        '{"evaluation_steps": ["step 1", "step 2", "..."]}\n'
+        '{{"evaluation_steps": ["step 1", "step 2", "..."]}}\n'
         "Each step must be specific, testable, and focused on the criterion above."
     )
     static_prompt_tokens: int = _count_tokens(SYSTEM_PROMPT) + template_static_tokens(USER_PROMPT)
@@ -58,7 +57,6 @@ class GevalStepsNode(BaseMetricNode):
 
     @staticmethod
     def _metric_key_sequence(metrics: list[GevalMetricInput]) -> list[str]:
-        """Return deterministic keys; duplicate names become name#2, name#3."""
         name_counts: dict[str, int] = {}
         for metric in metrics:
             name_counts[metric.name] = name_counts.get(metric.name, 0) + 1
@@ -75,135 +73,135 @@ class GevalStepsNode(BaseMetricNode):
         return keys
 
     def _signature(self, criteria: str) -> str:
-        return str(
-            compute_geval_signature(
-                criteria=criteria,
-                model=self.judge_model,
-                prompt_version=self.prompt_version,
-                parser_version=self.parser_version,
-            )
+        return compute_geval_signature(
+            criteria=criteria,
+            model=self.judge_model,
+            prompt_version=self.prompt_version,
+            parser_version=self.parser_version,
         )
 
-    def _generate_steps(self, criteria: str, metric_name: str) -> list[str]:
+    def _generate_steps(self, criteria: str, metric_name: str) -> tuple[list[Item], CostEstimate]:
         llm = get_llm("geval_steps", _GevalStepsResponse, self.judge_model)
-        messages = [
-            {"role": "system", "content": self.SYSTEM_PROMPT},
-            {"role": "user", "content": self.USER_PROMPT.format(criteria=criteria)},
-        ]
-        response = llm.invoke(messages)
+        response = llm.invoke(
+            [
+                {"role": "system", "content": self.SYSTEM_PROMPT},
+                {"role": "user", "content": self.USER_PROMPT.format(criteria=criteria)},
+            ]
+        )
+
+        pricing = get_model_pricing(self.judge_model)
+        prompt_tokens = float(response["usage"]["prompt_tokens"])
+        completion_tokens = float(response["usage"]["completion_tokens"])
+        cost = CostEstimate(
+            input_tokens=prompt_tokens,
+            output_tokens=completion_tokens,
+            cost=cost_usd(prompt_tokens, pricing, "input")
+            + cost_usd(completion_tokens, pricing, "output"),
+        )
+
         parsed: _GevalStepsResponse | None = response["parsed"]
-        steps = [s.strip() for s in (parsed.evaluation_steps if parsed else []) if s and s.strip()]
-        if not steps:
+        raw_steps = [s.strip() for s in (parsed.evaluation_steps if parsed else []) if s and s.strip()]
+        if not raw_steps:
             raise RuntimeError(f"GEval steps generation failed for metric '{metric_name}'.")
-        return steps
 
-    # @classmethod
-    # def resolve_cost_kwargs(
-    #     cls,
-    #     *,
-    #     cases: Optional[list] = None,
-    #     model: Optional[str] = None,
-    #     **_ignored,
-    # ) -> dict[str, Optional[int]]:
-    #     # Kept lightweight under new schema; precise cache-aware counting can be
-    #     # reintroduced once run-state record adapters are stabilized.
-    #     del cases, model
-    #     return {"uncached_unique_rules": None}
+        steps = [Item(text=step, tokens=float(_count_tokens(step)), cached=False) for step in raw_steps]
+        return steps, cost
 
-    def run(self, case: EvalCase) -> GevalResolvedPayload:  # type: ignore[override]
-        """Resolve metrics from `case.input_payload.geval` into canonical metrics."""
-        metrics = case.input_payload.geval.metrics if case.input_payload.geval else []
-        if not metrics:
-            return GevalResolvedPayload(metrics=[], cost=None)
+    def run(  # type: ignore[override]
+        self,
+        metrics: list[GevalMetricInput],
+        enable_geval: bool = True,
+    ) -> GevalStepsArtifacts:
+        zero_cost = CostEstimate(cost=0.0, input_tokens=None, output_tokens=None)
+        if not enable_geval or not metrics:
+            return GevalStepsArtifacts(resolved_steps=[], cost=zero_cost)
 
         resolved: list[GevalStepsResolved] = []
-        input_tokens = 0
-        for key, metric in zip(self._metric_key_sequence(metrics), metrics):
+        total_input_tokens = 0.0
+        total_output_tokens = 0.0
+        total_cost = 0.0
 
-            # When for a metrics Steps are provided, we use them directly
+        for key, metric in zip(self._metric_key_sequence(metrics), metrics):
             if metric.evaluation_steps:
                 resolved.append(
                     GevalStepsResolved(
                         key=key,
                         name=metric.name,
-                        record_fields=list(metric.record_fields),
-                        evaluation_steps=metric.evaluation_steps,
+                        item_fields=list(metric.item_fields),
+                        evaluation_steps=[Item(**step.model_dump()) for step in metric.evaluation_steps],
                         steps_source="provided",
                         signature=None,
                     )
                 )
                 continue
 
-            # When Criteria is not Provided we continue
-            criteria_text = (metric.criteria.text or "").strip()
-            criteria_tokens = metric.criteria.tokens
+            criteria_text = (metric.criteria.text if metric.criteria else "").strip()
             if not criteria_text:
-                # Validator should prevent this, but keep a defensive fallback.
                 log.warning(f"Skipping GEval metric with no criteria/steps: {metric.name}")
                 continue
 
-            # ------------------------------------------------
-            # When Steps are not provided but Criteria is.
-            # ------------------------------------------------
             signature = self._signature(criteria_text)
             cached_steps = self._artifact_cache.get_steps(signature)
 
-            # When the Criteris is not Cached we generate the steps
-            if cached_steps is None:
-                generated_steps = [
-                    GevalEvaluationStep(text=step, tokens=_count_tokens(step)) 
-                    self._generate_steps(criteria_text, metric.name)
-                ]
-                self._artifact_cache.put_steps(
-                    signature=signature,
-                    model=self.judge_model,
-                    criteria=criteria,
-                    evaluation_steps=generated_steps,
-                    prompt_version=self.prompt_version,
-                    parser_version=self.parser_version,
+            if cached_steps is not None:
+                resolved.append(
+                    GevalStepsResolved(
+                        key=key,
+                        name=metric.name,
+                        item_fields=list(metric.item_fields),
+                        evaluation_steps=[Item(**step.model_dump()) for step in cached_steps],
+                        steps_source="cache_used",
+                        signature=signature,
+                    )
                 )
-                input_tokens += criteria_tokens
-                output_tokens += sum([_count_tokens(step.tokens) for step in generated_steps])
-                effective_steps = generated_steps
-                log.info(f"generated GEval steps for metric={metric.name} signature={signature}")
-            else:
-                # When the Criteris is Cached we use the cached steps
-                effective_steps = cached_steps
+                continue
+
+            generated_steps, generation_cost = self._generate_steps(criteria_text, metric.name)
+            total_input_tokens += float(generation_cost.input_tokens or 0.0)
+            total_output_tokens += float(generation_cost.output_tokens or 0.0)
+            total_cost += float(generation_cost.cost or 0.0)
+
+            self._artifact_cache.put_steps(
+                signature=signature,
+                model=self.judge_model,
+                criteria=metric.criteria
+                or Item(text=criteria_text, tokens=float(_count_tokens(criteria_text)), cached=False),
+                evaluation_steps=generated_steps,
+                prompt_version=self.prompt_version,
+                parser_version=self.parser_version,
+            )
+            log.info(f"Generated GEval steps for metric={metric.name} signature={signature}")
 
             resolved.append(
                 GevalStepsResolved(
                     key=key,
                     name=metric.name,
-                    record_fields=list(metric.record_fields),
-                    evaluation_steps=list(effective_steps),
+                    item_fields=list(metric.item_fields),
+                    evaluation_steps=[Item(**step.model_dump()) for step in generated_steps],
                     steps_source="generated",
                     signature=signature,
                 )
             )
 
-        return GevalStepsPayload(
-            metrics=resolved, 
-            cost=self.cost_estimate(
-                input_tokens=input_tokens,
-                output_tokens=sum([metric.tokens for metric in resolved]),
+        return GevalStepsArtifacts(
+            resolved_steps=resolved,
+            cost=CostEstimate(
+                cost=total_cost,
+                input_tokens=total_input_tokens if total_input_tokens > 0 else None,
+                output_tokens=total_output_tokens if total_output_tokens > 0 else None,
             )
+            if resolved
+            else zero_cost,
         )
 
-    def cost_estimate(
-        self,
-        input_tokens: float,
-        output_tokens: float,
-    ):
-        """Estimate step-generation cost under the current metadata contract."""
-
-        pricing = get_model_pricing(self.judge_model)  
-        input_tokens = self.static_prompt_tokens + input_tokens 
-
-        cost_per_record = cost_usd(input_tokens, pricing, "input") + cost_usd(
-            output_tokens, pricing, "output"
+    def estimate(self, input_tokens: float, output_tokens: float) -> CostEstimate:  # type: ignore[override]
+        pricing = get_model_pricing(self.judge_model)
+        billable_input = self.static_prompt_tokens + input_tokens
+        return CostEstimate(
+            input_tokens=billable_input,
+            output_tokens=output_tokens,
+            cost=cost_usd(billable_input, pricing, "input") + cost_usd(output_tokens, pricing, "output"),
         )
-        return EstimatePayload(
-           input_tokens=input_tokens,
-           output_tokens=output_tokens,
-           cost=cost_per_record
-        )
+
+    def cost_estimate(self, input_tokens: float, output_tokens: float) -> CostEstimate:
+        return self.estimate(input_tokens=input_tokens, output_tokens=output_tokens)

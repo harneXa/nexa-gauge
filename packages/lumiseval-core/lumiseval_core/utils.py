@@ -40,7 +40,7 @@ def template_static_tokens(template: str) -> int:
         # → tokens("Context:\\n\\n\\nClaims:\\n")
     """
     stripped = _PLACEHOLDER_RE.sub("", template)
-    return count_tokens(stripped)
+    return _count_tokens(stripped)
 
 
 def _to_serializable(obj: Any) -> Any:

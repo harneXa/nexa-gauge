@@ -14,36 +14,11 @@ Subclass contract:
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Union
+from typing import Any
 
 from lumiseval_core.constants import DEFAULT_JUDGE_MODEL
-from lumiseval_core.types import (
-    EstimatePayload,
-    InputPayload,
-    ChunkPayload,
-    ClaimPayload,
-    DedupPayload,
-    GroundingPayload,
-    RelevancePayload,
-    GevalStepsPayload,
-    GevalPayload,
-    RedteamPayload,
-    ReferencePayload,
-)
 
-NodeEstimate = Union[
-    EstimatePayload,
-    InputPayload,
-    ChunkPayload,
-    ClaimPayload,
-    DedupPayload,
-    GroundingPayload,
-    RelevancePayload,
-    GevalStepsPayload,
-    GevalPayload,
-    RedteamPayload,
-    ReferencePayload,
-]
+NodeEstimate = Any
 
 
 class BaseNode(ABC):
@@ -58,7 +33,7 @@ class BaseNode(ABC):
         ...
 
     @abstractmethod
-    def estimate(self, payload: NodeEstimate) -> NodeEstimate:
+    def estimate(self, *args: Any, **kwargs: Any) -> NodeEstimate:
         """Estimate cost for this node without running any LLM calls."""
         ...
 
