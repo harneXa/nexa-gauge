@@ -19,7 +19,7 @@ from lumiseval_core.errors import InputParseError
 from lumiseval_core.pipeline import NODE_ORDER, NODES_BY_NAME
 from lumiseval_core.types import EvalCase, EvalJobConfig
 from lumiseval_graph import CachedNodeRunner, estimate_preflight
-from lumiseval_ingest import create_dataset_adapter
+from lumiseval_cli.adapters import create_dataset_adapter
 from rich.console import Console
 from rich.table import Table
 

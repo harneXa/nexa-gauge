@@ -5,8 +5,6 @@ description = "Agentic LLM evaluation pipeline orchestrating RAGAS, DeepEval, an
 requires-python = ">=3.10"
 dependencies = [
     "lumiseval-core",
-    "lumiseval-ingest",
-    "lumiseval-evidence",
     "lumiseval-graph",
     "lumiseval-api",
     "lumiseval-cli",
@@ -23,10 +21,8 @@ dev-dependencies = [
 ]
 
 [tool.uv.sources]
-lumiseval-core     = { workspace = true }
-lumiseval-ingest   = { workspace = true }
-lumiseval-evidence = { workspace = true }
-lumiseval-graph    = { workspace = true }
+lumiseval-core  = { workspace = true }
+lumiseval-graph = { workspace = true }
 lumiseval-api      = { workspace = true }
 lumiseval-cli      = { workspace = true }
 
@@ -51,7 +47,5 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 testpaths = [
     "packages/lumiseval-core/test_lumiseval_core",
-    "packages/lumiseval-ingest/test_lumiseval_ingest",
-    "packages/lumiseval-evidence/test_lumiseval_evidence",
     "packages/lumiseval-graph/test_lumiseval_graph",
 ]

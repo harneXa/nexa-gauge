@@ -13,8 +13,6 @@ dependencies = [
     "rich>=13.0.0",
     "taskiq>=0.11.0",
     "lumiseval-core",
-    "lumiseval-ingest",
-    "lumiseval-evidence",
     "rouge-score>=0.1.2",
     "nltk>=3.8.0",
 ]
@@ -26,8 +24,6 @@ observability = [
 
 [tool.uv.sources]
 lumiseval-core = { workspace = true }
-lumiseval-ingest = { workspace = true }
-lumiseval-evidence = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
