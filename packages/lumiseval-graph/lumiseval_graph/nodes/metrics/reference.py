@@ -110,13 +110,10 @@ class ReferenceNode(BaseMetricNode):
             cost=zero_cost,
         )
 
-    def cost_estimate(
+    def estimate(
         self,
         input_tokens: float = 0.0,
         output_tokens: float = 0.0,
     ) -> CostEstimate:
         """No LLM calls — cost is always $0."""
         return CostEstimate(cost=0.0, input_tokens=None, output_tokens=None)
-
-    def estimate(self, input_tokens: float = 0.0, output_tokens: float = 0.0) -> CostEstimate:  # type: ignore[override]
-        return self.cost_estimate(input_tokens=input_tokens, output_tokens=output_tokens)

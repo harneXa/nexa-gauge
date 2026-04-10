@@ -112,10 +112,10 @@ class Inputs(BaseModel):
     @model_validator(mode="after")
     def _set_has_flags(self) -> "Inputs":
         self.has_generation = bool(self.generation and self.generation.text)
-        self.has_question = self.question is not None
-        self.has_reference = self.reference is not None
-        self.has_context = self.context is not None
-        self.has_geval = self.geval is not None
+        self.has_question = bool(self.question and self.question.text.strip())
+        self.has_reference = bool(self.reference and self.reference.text.strip())
+        self.has_context = bool(self.context and self.context.text.strip())
+        self.has_geval = bool(self.geval and self.geval.metrics)
         return self
 
 

@@ -307,7 +307,7 @@ class GevalNode(BaseMetricNode):
             ),
         )
 
-    def cost_estimate(self, input_tokens: float, output_tokens: float) -> CostEstimate:
+    def estimate(self, input_tokens: float, output_tokens: float) -> CostEstimate:
         pricing = get_model_pricing(self.judge_model)
         per_call_cost = cost_usd(input_tokens, pricing, "input") + cost_usd(
             output_tokens, pricing, "output"
@@ -317,6 +317,3 @@ class GevalNode(BaseMetricNode):
             output_tokens=output_tokens,
             cost=per_call_cost,
         )
-
-    def estimate(self, input_tokens: float, output_tokens: float) -> CostEstimate:  # type: ignore[override]
-        return self.cost_estimate(input_tokens=input_tokens, output_tokens=output_tokens)

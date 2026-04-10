@@ -50,20 +50,6 @@ from .nodes.scanner import scan as scan_record
 
 logger = logging.getLogger(__name__)
 
-# Module-level node loggers — one per pipeline node
-_log_scanner = get_node_logger("scan")
-_log_chunker = get_node_logger("chunk")
-_log_claims = get_node_logger("claims")
-_log_mmr = get_node_logger("dedup")
-_log_ragas = get_node_logger("relevance")
-_log_hallucination = get_node_logger("grounding")
-_log_adversarial = get_node_logger("redteam")
-_log_geval_steps = get_node_logger("geval_steps")
-_log_geval = get_node_logger("geval")
-_log_reference = get_node_logger("reference")
-_log_agg = get_node_logger("eval")
-_log_report = get_node_logger("report")
-
 
 # ── Graph state ────────────────────────────────────────────────────────────
 class EvalCase(TypedDict):
@@ -120,8 +106,12 @@ def node_metadata_scanner(state: dict[str, Any]) -> dict[str, Any]:
 @observe(name="node_generation_chunk")
 def node_generation_chunk(state: EvalCase) -> dict[str, Any]:
     inputs = state["inputs"]
-    if not inputs or not inputs.generation:
+
+    should_run = bool(inputs and inputs.has_generation)
+    
+    if not should_run:
         return {"generation_chunk": None}
+
     chunks: ChunkArtifacts = ChunkExtractorNode(
         chunk_size=GENERATION_CHUNK_SIZE_TOKENS
     ).run(item=inputs.generation)
@@ -133,8 +123,12 @@ def node_generation_chunk(state: EvalCase) -> dict[str, Any]:
 def node_generation_claims(state: EvalCase) -> dict[str, Any]:
     inputs = state["inputs"]
     generation_chunk = state.get("generation_chunk")
-    if not inputs or not inputs.generation or not generation_chunk:
+
+    should_run = bool(inputs and inputs.has_generation and generation_chunk and generation_chunk.chunks)
+
+    if not should_run:
         return {"generation_claims": None}
+    
     llm_overrides = state.get("llm_overrides")
     model = get_judge_model("claims", cfg.LLM_MODEL, llm_overrides=llm_overrides)
     claims = claim_extractor.ClaimExtractorNode(
@@ -150,9 +144,14 @@ def node_generation_claims(state: EvalCase) -> dict[str, Any]:
 @observe(name="node_generation_claims_dedup")
 def node_generation_claims_dedup(state: EvalCase) -> dict[str, Any]:
     generation_claims = state["generation_claims"]
-    if not generation_claims:
-        return {"generation_dedup_claims": None}
+    inputs = state["inputs"]
     claims_list = generation_claims.claims
+
+    should_run = bool(inputs and inputs.has_generation and claims_list)
+
+    if not should_run:
+        return {"generation_dedup_claims": None}
+    
     dedup_result = DedupNode().run(items=[c.item for c in claims_list])
     discarded_indices = set(dedup_result.dedup_map.keys())
 
@@ -169,18 +168,21 @@ def node_generation_claims_dedup(state: EvalCase) -> dict[str, Any]:
 @observe(name="node_grounding")
 def node_grounding(state: EvalCase) -> dict[str, Any]:
     inputs = state["inputs"]
-    if not inputs:
-        return {"grounding_metrics": None}
     dedup_claims = state["generation_dedup_claims"]
+    should_run = bool(inputs and inputs.has_generation and dedup_claims)
+
+    if not should_run:
+        return {"grounding_metrics": None}
+    
+    context_item = inputs.context
     claims: list[Claim] = dedup_claims.claims if dedup_claims else []
     llm_overrides = state.get("llm_overrides")
     model = get_judge_model("grounding", cfg.LLM_MODEL, llm_overrides=llm_overrides)
-    context_item = inputs.context
-    enable_grounding = bool(context_item and context_item.text.strip())
+    
     results = GroundingNode(judge_model=model, llm_overrides=llm_overrides).run(
         claims=claims,
         context=context_item or inputs.generation,
-        enable_grounding=enable_grounding,
+        enable_grounding=inputs.has_context,
     )
     return {"grounding_metrics": results}
 
@@ -188,8 +190,13 @@ def node_grounding(state: EvalCase) -> dict[str, Any]:
 @observe(name="node_relevance")
 def node_relevance(state: EvalCase) -> dict[str, Any]:
     inputs = state["inputs"]
-    if not inputs:
+    dedup_claims = state["generation_dedup_claims"]
+
+    should_run = bool(inputs and inputs.has_generation and inputs.has_question and dedup_claims)
+
+    if not should_run:
         return {"relevance_metrics": None}
+
     dedup_claims = state["generation_dedup_claims"]
     claims: list[Claim] = dedup_claims.claims if dedup_claims else []
     llm_overrides = state.get("llm_overrides")
@@ -197,7 +204,6 @@ def node_relevance(state: EvalCase) -> dict[str, Any]:
     results = RelevanceNode(judge_model=model, llm_overrides=llm_overrides).run(
         claims=claims,
         question=inputs.question,
-        enable_relevance=bool(inputs.question and inputs.question.text.strip()),
     )
     return {"relevance_metrics": results}
 
@@ -205,7 +211,10 @@ def node_relevance(state: EvalCase) -> dict[str, Any]:
 @observe(name="node_redteam")
 def node_redteam(state: EvalCase) -> dict[str, Any]:
     inputs = state["inputs"]
-    if not inputs:
+
+    should_run = bool(inputs and inputs.has_generation)
+
+    if not should_run:
         return {"redteam_metrics": None}
     llm_overrides = state.get("llm_overrides")
     model = get_judge_model("redteam", cfg.LLM_MODEL, llm_overrides=llm_overrides)
@@ -216,12 +225,14 @@ def node_redteam(state: EvalCase) -> dict[str, Any]:
 @observe(name="node_geval_steps")
 def node_geval_steps(state: EvalCase) -> dict[str, Any]:
     inputs = state["inputs"]
-    if not inputs or not inputs.has_geval:
+
+    should_run = bool(inputs and inputs.has_generation and inputs.has_geval)
+
+    if not should_run:
         return {"geval_steps": None}
+    
     geval_cfg = inputs.geval
     metrics = geval_cfg.metrics if geval_cfg is not None else []
-    if not metrics:
-        return {"geval_steps": None}
 
     llm_overrides = state.get("llm_overrides")
     model = get_judge_model("geval_steps", cfg.LLM_MODEL, llm_overrides=llm_overrides)
@@ -235,12 +246,14 @@ def node_geval_steps(state: EvalCase) -> dict[str, Any]:
 @observe(name="node_geval")
 def node_geval(state: EvalCase) -> dict[str, Any]:
     inputs = state["inputs"]
-    if not inputs or not inputs.has_geval:
+
+    should_run = bool(inputs and inputs.has_generation and inputs.has_geval)
+
+    if not should_run:
         return {"geval_metrics": None}
+    
     geval_cfg = inputs.geval
     metrics = geval_cfg.metrics if geval_cfg is not None else []
-    if not metrics:
-        return {"geval_metrics": None}
 
     llm_overrides = state.get("llm_overrides")
     model = get_judge_model("geval", cfg.LLM_MODEL, llm_overrides=llm_overrides)
@@ -259,8 +272,12 @@ def node_geval(state: EvalCase) -> dict[str, Any]:
 @observe(name="node_reference")
 def node_reference(state: EvalCase) -> dict[str, Any]:
     inputs = state["inputs"]
-    if not inputs or not inputs.reference:
+
+    should_run = bool(inputs and inputs.has_generation and inputs.has_reference)
+
+    if not should_run:
         return {"reference_metrics": None}
+    
     results = ReferenceNode().run(
         generation=inputs.generation,
         reference=inputs.reference,

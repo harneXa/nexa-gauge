@@ -208,6 +208,3 @@ class GevalStepsNode(BaseMetricNode):
             output_tokens=output_tokens,
             cost=cost_usd(billable_input, pricing, "input") + cost_usd(output_tokens, pricing, "output"),
         )
-
-    def cost_estimate(self, input_tokens: float, output_tokens: float) -> CostEstimate:
-        return self.estimate(input_tokens=input_tokens, output_tokens=output_tokens)

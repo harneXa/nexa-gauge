@@ -153,7 +153,7 @@ class NodeRunner:
             return False
         if spec.requires_geval and not cls._has_geval(case):
             return False
-        if spec.requires_reference and1 not cls._has_reference(case):
+        if spec.requires_reference and not cls._has_reference(case):
             return False
         return True
 

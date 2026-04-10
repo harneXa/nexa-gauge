@@ -55,15 +55,10 @@ def test_run_skips_when_disabled_or_reference_missing() -> None:
     assert blank_reference.cost.cost == 0.0
 
 
-def test_estimate_and_cost_estimate_return_zero_cost() -> None:
+def test_estimate_returns_zero_cost() -> None:
     node = ReferenceNode()
 
-    estimate = node.estimate(input_tokens=100.0, output_tokens=50.0)
-    assert estimate.cost == 0.0
-    assert estimate.input_tokens is None
-    assert estimate.output_tokens is None
-
-    cost = node.cost_estimate(input_tokens=100.0, output_tokens=50.0)
+    cost = node.estimate(input_tokens=100.0, output_tokens=50.0)
     assert cost.cost == 0.0
     assert cost.input_tokens is None
     assert cost.output_tokens is None
