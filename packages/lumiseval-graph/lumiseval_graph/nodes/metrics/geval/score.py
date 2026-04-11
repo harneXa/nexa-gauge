@@ -15,7 +15,12 @@ from deepeval.metrics import GEval
 from deepeval.test_case import LLMTestCase, LLMTestCaseParams
 from pydantic import BaseModel
 
-from lumiseval_core.constants import METRIC_PASS_THRESHOLD
+from lumiseval_core.constants import (
+    METRIC_PASS_THRESHOLD, 
+    AVG_DEEPEVAL_PROMPT_TOKENS, 
+    AVG_DEEPEVAL_OUTPUT_VERDICT,
+    AVG_DEEPEVAL_OUTPUT_REASONING_TOKENS
+)
 from lumiseval_graph.nodes.metrics.geval.cache import (
     GEVAL_STEPS_PARSER_VERSION,
     GEVAL_STEPS_PROMPT_VERSION,
@@ -28,7 +33,7 @@ from lumiseval_core.types import (
     MetricCategory,
     MetricResult,
 )
-
+from lumiseval_core.utils import _count_tokens
 from lumiseval_graph.llm.pricing import cost_usd, get_model_pricing
 from lumiseval_graph.log import get_node_logger
 from lumiseval_graph.nodes.base import BaseMetricNode
@@ -203,7 +208,7 @@ class GevalNode(BaseMetricNode):
                 name=metric.name,
                 category=MetricCategory.ANSWER,
                 score=score,
-                result=[{"passed": score >= METRIC_PASS_THRESHOLD, "reasoning": g_eval.reason or ""}],
+                result=[{"passed": score >= METRIC_PASS_THRESHOLD, "reasoning": g_eval.reason or "", "tokens": _count_tokens(g_eval.reason or "")}],
             ),
             usage=usage,
             cost=self._as_float(getattr(g_eval, "evaluation_cost", 0.0)),
@@ -307,7 +312,32 @@ class GevalNode(BaseMetricNode):
             ),
         )
 
-    def estimate(self, input_tokens: float, output_tokens: float) -> CostEstimate:
+    def estimate(
+        self, 
+        generation: Item,
+        question: Optional[Item],
+        reference: Optional[Item],
+        context: Optional[Item],
+        resolved_artifacts=list[GevalStepsResolved],
+    ) -> CostEstimate:
+
+        # TODO: Make sure all `generation`, `question`, `reference`, and `context` 
+        # TODO items are actually used in GEVAL evaluation
+        input_tokens = (
+            [
+                AVG_DEEPEVAL_PROMPT_TOKENS + 
+                sum([step.tokens for step in resolved_artifact.evaluation_steps])
+                for resolved_artifact in resolved_artifacts
+            ] + 
+            generation.tokens + 
+            (question.tokens if question else 0) + 
+            (reference.tokens if reference else 0) + 
+            (context.tokens if context else 0)
+        )
+        output_tokens = (
+            len(resolved_artifacts) * 
+            (AVG_DEEPEVAL_OUTPUT_REASONING_TOKENS+AVG_DEEPEVAL_OUTPUT_VERDICT)
+        )
         pricing = get_model_pricing(self.judge_model)
         per_call_cost = cost_usd(input_tokens, pricing, "input") + cost_usd(
             output_tokens, pricing, "output"

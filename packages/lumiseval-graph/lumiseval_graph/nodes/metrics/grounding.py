@@ -13,6 +13,10 @@ from lumiseval_core.types import (
     MetricCategory,
     MetricResult,
 )
+from lumiseval_core.constants import (
+    AVG_CLAIM_OUTPUT_TOKENS_BOOLEAN_VERDICT,
+    AVG_CLAIM_INPUT_TOKENS
+)
 from lumiseval_core.utils import _count_tokens, template_static_tokens
 from lumiseval_graph.llm.gateway import get_llm
 from lumiseval_graph.llm.pricing import cost_usd, get_model_pricing
@@ -107,11 +111,16 @@ class GroundingNode(BaseMetricNode):
         result, cost = self._grounding(claims=claims, context=context_text)
         return GroundingMetrics(metrics=[result], cost=cost)
 
-    def estimate(self, input_tokens: float, output_tokens: float) -> CostEstimate:  # type: ignore[override]
+    def estimate(self, claims: list[Claim], context: Item) -> CostEstimate:
+        input_tokens = (
+            self.static_prompt_tokens + 
+            context.tokens +
+            AVG_CLAIM_INPUT_TOKENS*len(claims)
+        )
+        output_tokens = AVG_CLAIM_OUTPUT_TOKENS_BOOLEAN_VERDICT + (len(claims) - 1)
         pricing = get_model_pricing(self.judge_model)
-        billable_input = self.static_prompt_tokens + input_tokens
         return CostEstimate(
-            input_tokens=billable_input,
+            input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cost=cost_usd(billable_input, pricing, "input") + cost_usd(output_tokens, pricing, "output"),
+            cost=cost_usd(input_tokens, pricing, "input") + cost_usd(output_tokens, pricing, "output"),
         )

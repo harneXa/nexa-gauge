@@ -15,6 +15,7 @@ Two runners are provided:
 """
 
 import time
+import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
@@ -170,6 +171,7 @@ class NodeRunner:
         node_name: str,
         job_config: EvalJobConfig | None = None,
         include_prerequisites: bool = True,
+        execution_mode: str = "run",
     ) -> NodeRunResult:
         if node_name not in NODE_FNS:
             valid = ", ".join(sorted(NODE_FNS))
@@ -185,6 +187,7 @@ class NodeRunner:
             target_node=node_name,
             geval=case.geval,
             reference_files=case.reference_files,
+            execution_mode=execution_mode,
             )
         )
 
@@ -282,6 +285,7 @@ class CachedNodeRunner:
         node_name: str,
         job_config: EvalJobConfig | None = None,
         force: bool = False,
+        execution_mode: str = "run",
     ) -> CaseNodePlan:
         """Plan one case without executing any node function.
 
@@ -305,9 +309,14 @@ class CachedNodeRunner:
             target_node=node_name,
             geval=case.geval,
             reference_files=case.reference_files,
+            execution_mode=execution_mode,
             )
         )
         case_hash, config_hash = self._compute_hashes(case, state["job_config"])
+        if execution_mode != "run":
+            config_hash = hashlib.sha256(
+                f"{config_hash}|execution_mode={execution_mode}".encode()
+            ).hexdigest()[:16]
         planned_nodes = self._plan_nodes(node_name)
 
         to_run_nodes: list[str] = []
@@ -351,6 +360,7 @@ class CachedNodeRunner:
         node_name: str,
         job_config: EvalJobConfig | None = None,
         force: bool = False,
+        execution_mode: str = "run",
     ) -> DatasetNodePlan:
         """Plan an entire dataset run for a target node.
 
@@ -380,6 +390,7 @@ class CachedNodeRunner:
                 node_name=node_name,
                 job_config=job_config,
                 force=force,
+                execution_mode=execution_mode,
             )
             case_plans.append(plan)
             for step in plan.to_run_nodes:
@@ -411,6 +422,7 @@ class CachedNodeRunner:
         node_name: str,
         job_config: EvalJobConfig | None = None,
         force: bool = False,
+        execution_mode: str = "run",
     ) -> CachedNodeRunResult:
         """Execute one case to `node_name` with cache reuse and per-node cache writes.
 
@@ -437,10 +449,15 @@ class CachedNodeRunner:
             target_node=node_name,
             geval=case.geval,
             reference_files=case.reference_files,
+            execution_mode=execution_mode,
             )
         )
 
         case_hash, config_hash = self._compute_hashes(case, state["job_config"])
+        if execution_mode != "run":
+            config_hash = hashlib.sha256(
+                f"{config_hash}|execution_mode={execution_mode}".encode()
+            ).hexdigest()[:16]
         plan = self._plan_nodes(node_name)
         executed: list[str] = []
         cached: list[str] = []

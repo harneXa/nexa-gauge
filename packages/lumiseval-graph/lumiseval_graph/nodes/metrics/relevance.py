@@ -1,6 +1,6 @@
 """Claim-level answer relevancy metric node."""
 
-from typing import Literal, Tuple
+from typing import Tuple
 
 from pydantic import BaseModel
 
@@ -19,17 +19,16 @@ from lumiseval_graph.llm.pricing import cost_usd, get_model_pricing
 from lumiseval_graph.log import get_node_logger
 from lumiseval_graph.nodes.base import BaseMetricNode
 
+from lumiseval_core.constants import (
+    AVG_CLAIM_OUTPUT_TOKENS_BOOLEAN_VERDICT,
+    AVG_CLAIM_INPUT_TOKENS
+)
+
 log = get_node_logger("relevance")
-
-_Verdict = Literal["relevant", "irrelevant", "idk"]
-
-
-class _VerdictItem(BaseModel):
-    verdict: _Verdict
 
 
 class _RelevancyResult(BaseModel):
-    verdicts: list[_VerdictItem]
+    verdicts: list[bool]
 
 
 class RelevanceNode(BaseMetricNode):
@@ -38,12 +37,9 @@ class RelevanceNode(BaseMetricNode):
     USER_PROMPT = (
         "Question: {question}\n\n"
         "Statements extracted from an answer (one per line):\n{claims}\n\n"
-        "For each statement classify its relevance to the question above:\n"
-        "  - 'relevant'   : directly addresses the question\n"
-        "  - 'irrelevant' : does not relate to the question\n"
-        "  - 'idk'        : cannot determine relevance\n\n"
-        "Return JSON with key 'verdicts' containing objects: "
-        '{{"verdict":"relevant"|"irrelevant"|"idk"}} in the same order.'
+        "For each statement determine whether it is relevant to the question above. "
+        "Return a JSON object with key 'verdicts' containing a list of booleans "
+        "(true = relevant, false = not relevant) in the same order."
     )
     static_prompt_tokens: int = _count_tokens(SYSTEM_PROMPT) + template_static_tokens(USER_PROMPT)
 
@@ -83,10 +79,12 @@ class RelevanceNode(BaseMetricNode):
             )
 
         verdicts = result.verdicts[: len(claims)]
-        relevant_count = sum(1 for v in verdicts if v.verdict == "relevant")
-        score = relevant_count / len(verdicts)
+        score = sum(verdicts) / len(verdicts)
 
-        per_claim = [Relevancy(**c.model_dump(), verdict=v.verdict) for c, v in zip(claims, verdicts)]
+        per_claim = [
+            Relevancy(**c.model_dump(), verdict="ACCEPTED" if v else "REJECTED")
+            for c, v in zip(claims, verdicts)
+        ]
 
         return (
             MetricResult(
@@ -123,7 +121,17 @@ class RelevanceNode(BaseMetricNode):
         result, cost = self._answer_relevancy(claims=claims, question=question_text)
         return RelevanceMetrics(metrics=[result], cost=cost)
 
-    def estimate(self, input_tokens: float, output_tokens: float) -> CostEstimate:  # type: ignore[override]
+    def estimate(
+        self, 
+        claims: list[Claim],
+        question: Item | str | None,
+    ) -> CostEstimate:
+        input_tokens = (
+            self.static_prompt_tokens + 
+            question.tokens +
+            AVG_CLAIM_INPUT_TOKENS*len(claims)
+        )
+        output_tokens = AVG_CLAIM_OUTPUT_TOKENS_BOOLEAN_VERDICT + (len(claims) - 1)
         pricing = get_model_pricing(self.judge_model)
         billable_input = self.static_prompt_tokens + input_tokens
         return CostEstimate(

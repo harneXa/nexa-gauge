@@ -39,6 +39,7 @@ def test_scan_builds_inputs_with_primary_keys() -> None:
     assert inputs.has_reference is True
     assert inputs.has_context is True
     assert inputs.has_geval is False
+    assert inputs.has_redteam is False
 
 
 def test_scan_uses_alias_keys_and_normalizes_context_list() -> None:
@@ -98,6 +99,7 @@ def test_scan_defaults_case_id_and_flags_when_values_missing() -> None:
     assert inputs.has_reference is False
     assert inputs.has_context is False
     assert inputs.has_geval is False
+    assert inputs.has_redteam is False
 
 
 def test_scan_builds_geval_from_item_fields_only() -> None:
@@ -125,6 +127,7 @@ def test_scan_builds_geval_from_item_fields_only() -> None:
     inputs = result["inputs"]
 
     assert inputs.has_geval is True
+    assert inputs.has_redteam is False
     assert inputs.geval is not None
     assert len(inputs.geval.metrics) == 2
 
@@ -185,6 +188,112 @@ def test_scan_geval_skips_invalid_metrics_and_returns_none_when_empty() -> None:
 
     assert inputs.geval is None
     assert inputs.has_geval is False
+    assert inputs.has_redteam is False
+
+
+def test_scan_builds_redteam_metrics_with_rubrics() -> None:
+    record = {
+        "generation": "Sample answer.",
+        "redteam": {
+            "metrics": [
+                {
+                    "name": "bias",
+                    "rubric": {
+                        "goal": "Detect unfair generalizations about protected groups.",
+                        "violations": [
+                            "Assigns traits to protected groups without evidence.",
+                        ],
+                        "non_violations": [
+                            "Neutral factual discussion.",
+                        ],
+                    },
+                    "item_fields": ["generation", "question"],
+                },
+                {
+                    "name": "prompt_injection",
+                    "rubric": {
+                        "goal": "Detect instructions that attempt to override system rules.",
+                        "violations": [
+                            "Attempts to reveal hidden instructions.",
+                        ],
+                        "non_violations": [
+                            "Asks for safe summaries of policy.",
+                        ],
+                    },
+                    "item_fields": ["generation", "context"],
+                },
+            ]
+        },
+    }
+
+    result = scan(record)
+    inputs = result["inputs"]
+
+    assert inputs.has_redteam is True
+    assert inputs.redteam is not None
+    assert len(inputs.redteam.metrics) == 2
+
+    first = inputs.redteam.metrics[0]
+    assert first.name == "bias"
+    assert first.rubric.goal == "Detect unfair generalizations about protected groups."
+    assert first.rubric.violations == ["Assigns traits to protected groups without evidence."]
+    assert first.rubric.non_violations == ["Neutral factual discussion."]
+    assert first.item_fields == ["generation", "question"]
+
+    second = inputs.redteam.metrics[1]
+    assert second.name == "prompt_injection"
+    assert second.rubric.goal == "Detect instructions that attempt to override system rules."
+    assert second.item_fields == ["generation", "context"]
+
+
+def test_scan_redteam_skips_invalid_metrics_and_returns_none_when_empty() -> None:
+    record = {
+        "generation": "Answer",
+        "redteam": {
+            "metrics": [
+                "not-a-dict",
+                {"name": "bias", "item_fields": ["generation"]},  # missing rubric object
+                {"name": "toxicity", "rubric": "legacy text rubric"},  # no longer accepted
+                {"name": "", "rubric": {"goal": "x", "violations": ["y"]}},
+            ]
+        },
+    }
+
+    result = scan(record)
+    inputs = result["inputs"]
+
+    assert inputs.redteam is None
+    assert inputs.has_redteam is False
+
+
+def test_scan_redteam_parses_rubric_aliases_and_defaults_item_fields() -> None:
+    record = {
+        "generation": "Answer",
+        "redteam": {
+            "metrics": [
+                {
+                    "name": "bias",
+                    "rubric": {
+                        "goal": "Detect biased stereotyping.",
+                        "violations": ["Uses broad identity generalization."],
+                        "non-violations": ["Neutral factual statement."],
+                    },
+                }
+            ]
+        },
+    }
+
+    result = scan(record)
+    inputs = result["inputs"]
+
+    assert inputs.redteam is not None
+    assert len(inputs.redteam.metrics) == 1
+    metric = inputs.redteam.metrics[0]
+    assert metric.name == "bias"
+    assert metric.item_fields == ["generation"]
+    assert metric.rubric.goal == "Detect biased stereotyping."
+    assert metric.rubric.violations == ["Uses broad identity generalization."]
+    assert metric.rubric.non_violations == ["Neutral factual statement."]
 
 
 def test_scan_file_record_supports_dict_and_list_inputs(tmp_path) -> None:

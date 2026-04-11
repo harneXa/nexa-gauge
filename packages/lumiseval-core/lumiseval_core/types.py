@@ -44,6 +44,8 @@ _ALLOWED_GEVAL_Item_FIELDS = {"question", "generation", "reference", "context"}
 
 
 GevalItemField = Literal["question", "generation", "reference", "context"]
+RedteamItemField = Literal["question", "generation", "reference", "context"]
+ExecutionMode = Literal["run", "estimate"]
 
 class Item(BaseModel):
     id: str = ""
@@ -66,6 +68,29 @@ class GevalMetricInput(BaseModel):
 class Geval(BaseModel):
     """Input contract carried by Item input payload."""
     metrics: list[GevalMetricInput] = Field(default_factory=list)
+
+
+class RedteamRubric(BaseModel):
+    """Structured rubric for one redteam metric."""
+
+    goal: str
+    violations: list[str]
+    non_violations: list[str] = Field(default_factory=list)
+
+
+class RedteamMetricInput(BaseModel):
+    """Input carried by one redteam metric per Item."""
+
+    name: str
+    rubric: RedteamRubric
+    item_fields: list[RedteamItemField] = Field(default_factory=lambda: ["generation"])
+
+
+class Redteam(BaseModel):
+    """Input contract for redteam metric configuration."""
+
+    metrics: list[RedteamMetricInput] = Field(default_factory=list)
+
 
 class Chunk(BaseModel):
     index: int
@@ -94,7 +119,7 @@ class Faithfulness(Claim):
 
 
 class Relevancy(Claim):
-    verdict: Literal["relevant", "irrelevant", "idk"]
+    verdict: Literal["ACCEPTED", "REJECTED"]
 
 class Inputs(BaseModel):
     generation: Item
@@ -102,12 +127,14 @@ class Inputs(BaseModel):
     reference: Optional[Item] = None
     context: Optional[Item] = None
     geval: Optional[Geval] = None
+    redteam: Optional[Redteam] = None
 
     has_generation: bool = False
     has_question: bool = False
     has_reference: bool = False
     has_context: bool = False
     has_geval: bool = False
+    has_redteam: bool = False
 
     @model_validator(mode="after")
     def _set_has_flags(self) -> "Inputs":
@@ -116,6 +143,7 @@ class Inputs(BaseModel):
         self.has_reference = bool(self.reference and self.reference.text.strip())
         self.has_context = bool(self.context and self.context.text.strip())
         self.has_geval = bool(self.geval and self.geval.metrics)
+        self.has_redteam = bool(self.redteam and self.redteam.metrics)
         return self
 
 

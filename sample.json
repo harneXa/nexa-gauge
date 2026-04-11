@@ -76,7 +76,7 @@
         },
         {
           "name": "diabetes_criterion_2",
-          "record_fields": ["generation"],
+          "record_fields": ["generation", "question"],
           "criteria": "Check whether the generation is aligned with the question"
         }
       ]

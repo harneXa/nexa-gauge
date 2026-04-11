@@ -4,7 +4,10 @@ from typing import Any, Mapping, Optional
 
 from pydantic import BaseModel, Field
 
-from lumiseval_core.constants import DEFAULT_JUDGE_MODEL
+from lumiseval_core.constants import (
+    DEFAULT_JUDGE_MODEL,  
+    AVG_CLAIM_INPUT_TOKENS
+)
 from lumiseval_core.types import Chunk, Claim, ClaimArtifacts, CostEstimate, Item
 from lumiseval_core.utils import _count_tokens, template_static_tokens
 from lumiseval_graph.llm.gateway import get_llm
@@ -91,11 +94,20 @@ class ClaimExtractorNode(BaseNode):
         log.success(f"{len(valid_claims)} total claim(s) across all chunks")
         return ClaimArtifacts(claims=valid_claims, cost=costs)
 
-    def estimate(self, input_tokens: float, output_tokens: float) -> CostEstimate:
+    def estimate(self, chunks: list[Chunk]) -> CostEstimate:
+
+        tokens = sum(
+            c.item.tokens
+            for c in chunks
+            if c.item and c.item.text.strip()
+        )
+        output_tokens=len(chunks)*AVG_CLAIM_INPUT_TOKENS
+            
+        input_tokens = self.static_prompt_tokens + tokens
         pricing = get_model_pricing(self.model)
-        billable_input = self.static_prompt_tokens + input_tokens
+        
         return CostEstimate(
-            input_tokens=billable_input,
+            input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cost=cost_usd(billable_input, pricing, "input") + cost_usd(output_tokens, pricing, "output"),
+            cost=cost_usd(input_tokens, pricing, "input") + cost_usd(output_tokens, pricing, "output"),
         )

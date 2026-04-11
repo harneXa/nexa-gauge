@@ -16,10 +16,14 @@ from lumiseval_core.types import (
     GevalMetricInput,
     Item,
     Inputs,
+    Redteam,
+    RedteamMetricInput,
+    RedteamRubric,
 )
 from lumiseval_core.utils import _count_tokens
 
 _GEVAL_ITEM_FIELDS = {"question", "generation", "reference", "context"}
+_REDTEAM_ITEM_FIELDS = {"question", "generation", "reference", "context"}
 
 
 class GraphEvalCase(TypedDict, total=False):
@@ -54,6 +58,41 @@ def _normalize_context_text(value: Any) -> str:
         parts = [str(item).strip() for item in value if item is not None and str(item).strip()]
         return "\n\n".join(parts)
     return str(value).strip()
+
+
+def _normalize_text_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    normalized: list[str] = []
+    for item in value:
+        text = _normalize_text(item)
+        if text:
+            normalized.append(text)
+    return normalized
+
+
+def _build_redteam_rubric(raw_rubric: Any) -> RedteamRubric | None:
+    if not isinstance(raw_rubric, dict):
+        return None
+
+    normalized_keys: dict[str, Any] = {}
+    for key, value in raw_rubric.items():
+        normalized_key = _normalize_text(key).lower().replace("-", "_").replace(" ", "_")
+        if normalized_key:
+            normalized_keys[normalized_key] = value
+
+    goal = _normalize_text(normalized_keys.get("goal"))
+    violations = _normalize_text_list(normalized_keys.get("violations"))
+    non_violations = _normalize_text_list(normalized_keys.get("non_violations"))
+
+    if not goal or not violations:
+        return None
+
+    return RedteamRubric(
+        goal=goal,
+        violations=violations,
+        non_violations=non_violations,
+    )
 
 
 def _build_geval(raw_geval: Any) -> Geval | None:
@@ -121,6 +160,50 @@ def _build_geval(raw_geval: Any) -> Geval | None:
     return Geval(metrics=metrics)
 
 
+def _build_redteam(raw_redteam: Any) -> Redteam | None:
+    if not isinstance(raw_redteam, dict):
+        return None
+
+    metrics_raw = raw_redteam.get("metrics")
+    if not isinstance(metrics_raw, list):
+        return None
+
+    metrics: list[RedteamMetricInput] = []
+    for metric_raw in metrics_raw:
+        if not isinstance(metric_raw, dict):
+            continue
+
+        name = _normalize_text(metric_raw.get("name"))
+        if not name:
+            continue
+
+        rubric = _build_redteam_rubric(metric_raw.get("rubric"))
+        if rubric is None:
+            continue
+
+        raw_item_fields = metric_raw.get("item_fields")
+        item_fields: list[str] = []
+        if isinstance(raw_item_fields, list):
+            for field in raw_item_fields:
+                normalized_field = _normalize_text(field)
+                if normalized_field in _REDTEAM_ITEM_FIELDS:
+                    item_fields.append(normalized_field)
+        if not item_fields:
+            item_fields = ["generation"]
+
+        metrics.append(
+            RedteamMetricInput(
+                name=name,
+                rubric=rubric,
+                item_fields=item_fields,
+            )
+        )
+
+    if not metrics:
+        return None
+    return Redteam(metrics=metrics)
+
+
 def _build_inputs(record: Mapping[str, Any]) -> Inputs:
     generation_text = _normalize_text(
         _pick_first(record, ["generation", "response", "answer", "output", "completion"])
@@ -131,6 +214,7 @@ def _build_inputs(record: Mapping[str, Any]) -> Inputs:
     )
     context_text = _normalize_context_text(_pick_first(record, ["context", "contexts", "documents"]))
     geval = _build_geval(_pick_first(record, ["geval"]))
+    redteam = _build_redteam(_pick_first(record, ["redteam"]))
 
     return Inputs(
         generation=Item(text=generation_text, tokens=float(_count_tokens(generation_text))),
@@ -150,11 +234,13 @@ def _build_inputs(record: Mapping[str, Any]) -> Inputs:
             else None
         ),
         geval=geval,
+        redteam=redteam,
         has_generation=bool(generation_text),
         has_question=bool(question_text),
         has_reference=bool(reference_text),
         has_context=bool(context_text),
         has_geval=geval is not None,
+        has_redteam=redteam is not None,
     )
 
 

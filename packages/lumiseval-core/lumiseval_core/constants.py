@@ -52,10 +52,10 @@ COST_FALLBACK_PER_CALL_USD: float = 0.0003
 # without actually running any LLM calls.
 
 # Average tokens in a single extracted claim text.
-AVG_CLAIM_TOKENS: int = 25 + 12 # 25 claims token, and 12 structured LLM output tokens
+AVG_CLAIM_INPUT_TOKENS: int = 25 + 12 # 25 claims token, and 12 structured LLM output tokens
 
 # Average output tokens for a single boolean verdict (grounding): "true"/"false".
-AVG_OUTPUT_TOKENS_BOOLEAN_VERDICT: int = 5
+AVG_CLAIM_OUTPUT_TOKENS_BOOLEAN_VERDICT: int = 7
 
 # Average output tokens for a single JSON relevance verdict:
 # {"verdict": "relevant"} is ~10 tokens.
@@ -63,8 +63,9 @@ AVG_OUTPUT_TOKENS_JSON_VERDICT: int = 10
 
 # DeepEval BiasMetric / ToxicityMetric each make internal LLM calls whose
 # prompts are not directly accessible. These constants approximate that overhead.
-AVG_DEEPEVAL_INPUT_OVERHEAD_TOKENS: int = 350
-AVG_DEEPEVAL_OUTPUT_OVERHEAD_TOKENS: int = 50
+AVG_DEEPEVAL_PROMPT_TOKENS: int = 100
+AVG_DEEPEVAL_OUTPUT_REASONING_TOKENS: int = 50
+AVG_DEEPEVAL_OUTPUT_VERDICT: int = 14
 
 # DeepEval GEval constructs a multi-step evaluation prompt per metric.
 AVG_GEVAL_INPUT_OVERHEAD_TOKENS: int = 400

@@ -18,7 +18,7 @@ from lumiseval_core.cache import CacheStore, NoOpCacheStore
 from lumiseval_core.errors import InputParseError
 from lumiseval_graph.topology import NODE_ORDER, NODES_BY_NAME
 from lumiseval_core.types import EvalCase, EvalJobConfig
-from lumiseval_graph import CachedNodeRunner, estimate_preflight
+from lumiseval_graph.runner import CachedNodeRunner
 from lumiseval_cli.adapters import create_dataset_adapter
 from rich.console import Console
 from rich.table import Table
@@ -216,7 +216,7 @@ def estimate(
     no_cache: bool = typer.Option(False, "--no-cache", help="Disable cache reads and writes."),
     cache_dir: Optional[str] = typer.Option(None, "--cache-dir", help="Cache directory path."),
 ) -> None:
-    """Estimate branch cost without executing graph nodes."""
+    """Estimate branch cost by executing the branch in estimate mode."""
     try:
         target_node = _resolve_target_node(node_name)
     except ValueError as exc:
@@ -252,35 +252,50 @@ def estimate(
     cache_store: CacheStore = NoOpCacheStore() if no_cache else CacheStore(cache_dir)
     runner = CachedNodeRunner(cache_store=cache_store)
 
-    console.print("[cyan]Scanning selected cases...[/cyan]")
-    try:
-        preflight = estimate_preflight(
-            cases=cases,
-            target_node=target_node,
-            runner=runner,
-            job_config=job_config,
-            force=force,
-            show_progress=True,
-        )
-    except Exception as exc:
-        console.print(f"[red]Estimate failed: {exc}[/red]")
-        raise typer.Exit(1)
+    console.print(f"\n[cyan]Estimating '{target_node}' on {len(cases)} case(s)...[/cyan]\n")
+    total_executed = 0
+    total_cached = 0
+    succeeded = 0
+    failed = 0
+    total_estimated_cost = 0.0
+    failures: list[tuple[str, str]] = []
 
-    _print_scan_table(preflight.metadata)
-    _print_node_eligibility_table(preflight.metadata)
-    _print_execution_plan_table(preflight.plan, total_records=preflight.metadata.record_count)
-    _print_cost_table(
-        preflight.cost_report,
-        total_records=preflight.metadata.record_count,
-        highlight_nodes=set(preflight.plan.planned_nodes),
-        visible_nodes=set(preflight.plan.planned_nodes),
-        target_node=target_node,
-    )
-    target_row = preflight.cost_report.row(target_node)
+    for case in cases:
+        try:
+            result = runner.run_case(
+                case=case,
+                node_name=target_node,
+                job_config=job_config,
+                force=force,
+                execution_mode="estimate",
+            )
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1)
+        except Exception as exc:
+            failed += 1
+            failures.append((case.case_id, str(exc)))
+            console.print(f"  [{case.case_id}] [red]failed[/red]  {exc}")
+            continue
+
+        succeeded += 1
+        total_executed += len(result.executed_nodes)
+        total_cached += len(result.cached_nodes)
+        case_estimate = result.final_state.get("cost_estimate")
+        if case_estimate is not None and hasattr(case_estimate, "cost"):
+            total_estimated_cost += float(case_estimate.cost or 0.0)
+
     console.print(
-        f"\n[bold green]Estimate complete.[/bold green] "
-        f"target={target_node} delta_cost=${target_row.cost_usd:.6f}"
+        f"\n[bold green]Estimate complete.[/bold green]  "
+        f"target={target_node}  cases={len(cases)}  succeeded={succeeded}  failed={failed}  "
+        f"executed_steps={total_executed}  cached_steps={total_cached}  "
+        f"estimated_cost=${total_estimated_cost:.6f}"
     )
+
+    if failures:
+        console.print("\n[yellow]Failures:[/yellow]")
+        for case_id, err in failures[:10]:
+            console.print(f"  - {case_id}: {err}")
 
 
 @app.command()
@@ -393,6 +408,7 @@ def run(
                 node_name=target_node,
                 job_config=job_config,
                 force=force,
+                execution_mode="run",
             )
         except ValueError as exc:
             console.print(f"[red]{exc}[/red]")

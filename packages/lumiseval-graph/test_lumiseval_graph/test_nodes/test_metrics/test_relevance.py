@@ -25,8 +25,8 @@ def test_run_returns_metric_and_cost_with_mocked_llm(monkeypatch: pytest.MonkeyP
             return {
                 "parsed": SimpleNamespace(
                     verdicts=[
-                        SimpleNamespace(verdict="relevant"),
-                        SimpleNamespace(verdict="irrelevant"),
+                        True,
+                        False,
                     ]
                 ),
                 "parsing_error": None,
