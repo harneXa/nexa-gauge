@@ -4,7 +4,6 @@
 # uv run pytest -s -k "llm and config" packages/lumiseval-graph/test_lumiseval_graph/test_llm/test_config.py
 
 import pytest
-
 from lumiseval_graph.llm.config import get_judge_model, normalize_node_name
 
 

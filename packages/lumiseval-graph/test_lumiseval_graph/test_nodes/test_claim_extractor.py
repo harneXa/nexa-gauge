@@ -7,7 +7,6 @@ import hashlib
 from types import SimpleNamespace
 
 import pytest
-
 from lumiseval_core.types import Chunk, Item
 from lumiseval_graph.nodes import claim_extractor as claim_module
 from lumiseval_graph.nodes.claim_extractor import ClaimExtractorNode

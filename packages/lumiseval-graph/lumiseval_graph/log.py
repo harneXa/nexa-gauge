@@ -7,10 +7,11 @@ Uses Rich for colored output. Import get_node_logger() in each node module.
 
 from datetime import datetime
 
-from lumiseval_graph.topology import NODES_BY_NAME
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
+
+from lumiseval_graph.topology import NODES_BY_NAME
 
 _console = Console(highlight=False)
 

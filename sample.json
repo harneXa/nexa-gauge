@@ -137,7 +137,6 @@
 
   {
     "case_id": "shakespeare-hamlet-short",
-    "question": "What is the central theme of Shakespeare's Hamlet?",
     "generation": "The central theme of Hamlet is mortality and the paralysis that arises from contemplating it. Through the famous 'To be or not to be' soliloquy and repeated encounters with death — the Ghost, Yorick's skull, Ophelia's drowning — Shakespeare explores how consciousness of death impedes decisive action. Secondary themes include revenge and its moral cost, corruption in the Danish court, appearance versus reality, and the burden of filial duty. Hamlet's indecision stems not from cowardice but from his philosophical nature: he cannot act without questioning the meaning and consequences of every action.",
     "reference": "Hamlet's central themes include mortality, revenge, corruption, and the difficulty of action in the face of moral uncertainty."
   },

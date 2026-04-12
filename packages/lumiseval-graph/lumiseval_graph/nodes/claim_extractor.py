@@ -2,18 +2,14 @@
 
 from typing import Any, Mapping, Optional
 
-from pydantic import BaseModel, Field
-
-from lumiseval_core.constants import (
-    DEFAULT_JUDGE_MODEL,  
-    AVG_CLAIM_INPUT_TOKENS
-)
+from lumiseval_core.constants import AVG_CLAIM_INPUT_TOKENS, DEFAULT_JUDGE_MODEL
 from lumiseval_core.types import Chunk, Claim, ClaimArtifacts, CostEstimate, Item
 from lumiseval_core.utils import _count_tokens, template_static_tokens
 from lumiseval_graph.llm.gateway import get_llm
 from lumiseval_graph.llm.pricing import cost_usd, get_model_pricing
 from lumiseval_graph.log import get_node_logger
 from lumiseval_graph.nodes.base import BaseNode
+from pydantic import BaseModel, Field
 
 log = get_node_logger("claims")
 
@@ -106,10 +102,10 @@ class ClaimExtractorNode(BaseNode):
             if c.item and c.item.text.strip()
         )
         output_tokens=len(chunks)*AVG_CLAIM_INPUT_TOKENS
-            
+
         input_tokens = self.static_prompt_tokens + tokens
         pricing = get_model_pricing(self.model)
-        
+
         return CostEstimate(
             input_tokens=input_tokens,
             output_tokens=output_tokens,

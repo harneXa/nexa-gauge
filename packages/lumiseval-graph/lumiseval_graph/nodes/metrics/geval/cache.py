@@ -9,10 +9,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-from pydantic import BaseModel
-
 from lumiseval_core.constants import CACHE_DIR
 from lumiseval_core.types import Item
+from pydantic import BaseModel
 
 GEVAL_STEPS_PROMPT_VERSION = "v1"
 GEVAL_STEPS_PARSER_VERSION = "v1"

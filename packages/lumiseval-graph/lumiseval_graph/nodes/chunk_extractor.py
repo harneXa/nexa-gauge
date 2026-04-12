@@ -3,7 +3,6 @@
 import hashlib
 
 import semchunk
-
 from lumiseval_core.constants import CHUNK_MIN_TOKENS_FOR_SPLIT, GENERATION_CHUNK_SIZE_TOKENS
 from lumiseval_core.types import Chunk, ChunkArtifacts, CostEstimate, Item
 from lumiseval_core.utils import _count_tokens
@@ -57,7 +56,7 @@ class ChunkExtractorNode(BaseNode):
             )
             cursor = end
 
-       
+
         log.success(f"{len(chunks)} chunk(s) produced")
         return ChunkArtifacts(chunks=chunks, cost=cost)
 

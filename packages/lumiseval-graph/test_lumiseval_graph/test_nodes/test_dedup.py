@@ -4,7 +4,6 @@
 # uv run pytest -s -k "dedup" packages/lumiseval-graph/test_lumiseval_graph/test_nodes/test_dedup.py
 
 import pytest
-
 from lumiseval_core.types import Item
 from lumiseval_graph.nodes import dedup as dedup_module
 from lumiseval_graph.nodes.dedup import DedupNode

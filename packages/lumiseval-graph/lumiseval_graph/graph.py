@@ -29,8 +29,8 @@ from lumiseval_core.types import (
     GevalStepsArtifacts,
     GroundingMetrics,
     Inputs,
-    ReferenceMetrics,
     RedteamMetrics,
+    ReferenceMetrics,
     RelevanceMetrics,
 )
 
@@ -43,8 +43,8 @@ from .nodes.metrics.grounding import GroundingNode
 from .nodes.metrics.redteam import RedteamNode
 from .nodes.metrics.reference import ReferenceNode
 from .nodes.metrics.relevance import RelevanceNode
-from .observability import observe
 from .nodes.scanner import scan as scan_record
+from .observability import observe
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class EvalCase(TypedDict):
     execution_mode: ExecutionMode
     estimated_costs: dict[str, CostEstimate]
     reference_files: list[Path] = []
-    
+
     # Pipeline inputs
     inputs: Optional[Inputs]
 
@@ -71,7 +71,7 @@ class EvalCase(TypedDict):
     geval_steps: Optional[GevalStepsArtifacts]
     geval_metrics: Optional[GevalMetrics]
     reference_metrics: Optional[ReferenceMetrics]
-    
+
 
 def _is_estimate_mode(state: Mapping[str, Any]) -> bool:
     return state.get("execution_mode") == "estimate"
@@ -125,7 +125,7 @@ def node_metadata_scanner(state: EvalCase) -> dict[str, Any]:
     - node_chunk still reads state["generation"], not state["inputs"].
     - So inputs is available downstream, but node_chunk won't use it unless you change it.
     """
-    # Per-record scan only: hydrate `inputs` from the current state payload.    
+    # Per-record scan only: hydrate `inputs` from the current state payload.
     records = state["record"]
 
     raw_record = {
@@ -149,7 +149,7 @@ def node_generation_chunk(state: EvalCase) -> dict[str, Any]:
     estimate_mode = _is_estimate_mode(state)
 
     should_run = bool(inputs and inputs.has_generation)
-    
+
     if not should_run:
         return {"generation_chunk": None}
 
@@ -179,7 +179,7 @@ def node_generation_claims(state: EvalCase) -> dict[str, Any]:
 
     if not should_run:
         return {"generation_claims": None}
-    
+
     llm_overrides = state.get("llm_overrides")
     model = get_judge_model("claims", cfg.LLM_MODEL, llm_overrides=llm_overrides)
     node = claim_extractor.ClaimExtractorNode(
@@ -212,7 +212,7 @@ def node_generation_claims_dedup(state: EvalCase) -> dict[str, Any]:
 
     if not should_run:
         return {"generation_dedup_claims": None}
-    
+
     node = DedupNode()
     if estimate_mode:
         dedup_cost = CostEstimate(cost=0.0, input_tokens=None, output_tokens=None)
@@ -345,7 +345,7 @@ def node_geval_steps(state: EvalCase) -> dict[str, Any]:
 
     if not should_run:
         return {"geval_steps": None}
-    
+
     geval_cfg = inputs.geval
     metrics = geval_cfg.metrics if geval_cfg is not None else []
 
@@ -375,7 +375,7 @@ def node_geval(state: EvalCase) -> dict[str, Any]:
 
     if not should_run:
         return {"geval_metrics": None}
-    
+
     llm_overrides = state.get("llm_overrides")
     model = get_judge_model("geval", cfg.LLM_MODEL, llm_overrides=llm_overrides)
     node = GevalNode(judge_model=model)
@@ -415,7 +415,7 @@ def node_reference(state: EvalCase) -> dict[str, Any]:
 
     if not should_run:
         return {"reference_metrics": None}
-    
+
     node = ReferenceNode()
     if estimate_mode:
         estimated_cost = node.estimate(input_tokens=0.0, output_tokens=0.0)

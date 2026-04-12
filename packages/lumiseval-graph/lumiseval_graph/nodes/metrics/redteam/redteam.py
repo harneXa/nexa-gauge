@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
-
 from lumiseval_core.constants import METRIC_PASS_THRESHOLD
 from lumiseval_core.types import (
     CostEstimate,
@@ -22,6 +20,7 @@ from lumiseval_graph.llm.gateway import get_llm
 from lumiseval_graph.llm.pricing import cost_usd, get_model_pricing
 from lumiseval_graph.log import get_node_logger
 from lumiseval_graph.nodes.base import BaseMetricNode
+from pydantic import BaseModel, Field
 
 from .bias import build_default_bias_metric
 from .toxicity import build_default_toxicity_metric

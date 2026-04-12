@@ -5,11 +5,10 @@
 
 from types import SimpleNamespace
 
+import lumiseval_graph.nodes.metrics.geval.steps as steps_module
 import pytest
-
 from lumiseval_core.types import GevalMetricInput, Item
 from lumiseval_graph.nodes.metrics.geval.cache import GevalArtifactCache, compute_geval_signature
-import lumiseval_graph.nodes.metrics.geval.steps as steps_module
 from lumiseval_graph.nodes.metrics.geval.steps import GevalStepsNode
 
 

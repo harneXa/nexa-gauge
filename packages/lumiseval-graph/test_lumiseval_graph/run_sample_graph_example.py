@@ -14,7 +14,6 @@ from typing import Any
 
 from lumiseval_core.types import MetricCategory, MetricResult
 
-
 ROOT = Path(__file__).resolve().parents[3]
 SAMPLE_PATH = ROOT / "sample.json"
 

@@ -13,9 +13,8 @@ To add a new metric node:
 
 from typing import Any, Callable
 
-from lumiseval_graph.topology import PIPELINE
-
 from lumiseval_graph import graph as _graph
+from lumiseval_graph.topology import PIPELINE
 
 NodeFn = Callable[[dict[str, Any]], dict[str, Any]]
 

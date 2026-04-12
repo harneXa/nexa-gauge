@@ -1,7 +1,8 @@
 """Dataset adapter protocol for loading canonical EvalCase rows."""
 
-from typing import Any
 from abc import ABC, abstractmethod
+from typing import Any
+
 
 class DatasetAdapter(ABC):
     """Base adapter contract for all dataset sources."""

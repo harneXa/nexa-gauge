@@ -13,19 +13,13 @@ from typing import Any, Optional
 
 from deepeval.metrics import GEval
 from deepeval.test_case import LLMTestCase, LLMTestCaseParams
-from pydantic import BaseModel
-
 from lumiseval_core.constants import (
-    AVG_DEEPEVAL_GEVAL_CRITERIA_STEPS,
     AVG_DEEPEVAL_GEVAL_CRITERIA_STEP_TOKENS,
+    AVG_DEEPEVAL_GEVAL_CRITERIA_STEPS,
     AVG_DEEPEVAL_OUTPUT_REASONING_TOKENS,
     AVG_DEEPEVAL_OUTPUT_VERDICT,
     AVG_DEEPEVAL_PROMPT_TOKENS,
     METRIC_PASS_THRESHOLD,
-)
-from lumiseval_graph.nodes.metrics.geval.cache import (
-    GEVAL_STEPS_PARSER_VERSION,
-    GEVAL_STEPS_PROMPT_VERSION,
 )
 from lumiseval_core.types import (
     CostEstimate,
@@ -40,6 +34,11 @@ from lumiseval_core.utils import _count_tokens
 from lumiseval_graph.llm.pricing import cost_usd, get_model_pricing
 from lumiseval_graph.log import get_node_logger
 from lumiseval_graph.nodes.base import BaseMetricNode
+from lumiseval_graph.nodes.metrics.geval.cache import (
+    GEVAL_STEPS_PARSER_VERSION,
+    GEVAL_STEPS_PROMPT_VERSION,
+)
+from pydantic import BaseModel
 
 log = get_node_logger("geval")
 

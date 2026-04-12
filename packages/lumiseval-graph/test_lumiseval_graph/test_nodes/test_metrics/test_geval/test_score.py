@@ -1,9 +1,8 @@
 from types import SimpleNamespace
 
-import pytest
-
-from lumiseval_core.types import GevalStepsResolved, Item
 import lumiseval_graph.nodes.metrics.geval.score as score_module
+import pytest
+from lumiseval_core.types import GevalStepsResolved, Item
 from lumiseval_graph.nodes.metrics.geval.score import GevalNode
 
 

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 from typing import Any
 
-from pydantic import BaseModel
-import re
 import tiktoken
+from pydantic import BaseModel
 
 from .constants import TIKTOKEN_ENCODING
 

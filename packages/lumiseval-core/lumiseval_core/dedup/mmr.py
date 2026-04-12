@@ -8,11 +8,10 @@ package boundaries.
 """
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
-
 from lumiseval_core.config import config
 from lumiseval_core.constants import MMR_LAMBDA, MMR_SIMILARITY_THRESHOLD
 from lumiseval_core.types import Item
+from sentence_transformers import SentenceTransformer
 
 _SIMILARITY_THRESHOLD = MMR_SIMILARITY_THRESHOLD
 _LAMBDA = MMR_LAMBDA

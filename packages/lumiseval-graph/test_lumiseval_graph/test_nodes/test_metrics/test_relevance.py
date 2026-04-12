@@ -5,10 +5,9 @@
 
 from types import SimpleNamespace
 
-import pytest
-
-from lumiseval_core.types import Claim, Item
 import lumiseval_graph.nodes.metrics.relevance as relevance_module
+import pytest
+from lumiseval_core.types import Claim, Item
 from lumiseval_graph.nodes.metrics.relevance import RelevanceNode
 
 

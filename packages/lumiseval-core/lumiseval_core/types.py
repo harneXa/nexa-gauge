@@ -8,7 +8,6 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-
 ExecutionMode = Literal["run", "estimate"]
 
 # ── Enums ──────────────────────────────────────────────────────────────────
@@ -71,7 +70,7 @@ class GevalMetricInput(BaseModel):
     name: str
     item_fields: list[GevalItemField] = Field(default_factory=lambda: ["generation"])
     criteria: Item | None = None
-    evaluation_steps: list[Item] 
+    evaluation_steps: list[Item]
 
 class Geval(BaseModel):
     """Input contract carried by Item input payload."""

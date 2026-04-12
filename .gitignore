@@ -52,4 +52,5 @@ idea.md
 .lumiseval_cache
 .mypy_cache
 .ruff_cache
-scripts/*
+scripts/*PR.md
+report/*

@@ -6,7 +6,6 @@
 from types import SimpleNamespace
 
 import pytest
-
 from lumiseval_core.types import Claim, Item
 from lumiseval_graph.nodes.metrics import grounding as grounding_module
 from lumiseval_graph.nodes.metrics.grounding import GroundingNode

@@ -6,10 +6,10 @@
 from __future__ import annotations
 
 from lumiseval_core.types import (
-    Claim,
-    ClaimArtifacts,
     Chunk,
     ChunkArtifacts,
+    Claim,
+    ClaimArtifacts,
     CostEstimate,
     Geval,
     GevalMetricInput,

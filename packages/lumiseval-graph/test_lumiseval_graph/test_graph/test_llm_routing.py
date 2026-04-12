@@ -18,7 +18,6 @@ from lumiseval_core.types import (
 )
 
 
-
 def _make_chunk(text: str) -> Chunk:
     return Chunk(
         index=0,

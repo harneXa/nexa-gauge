@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 import builtins
 import importlib
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-
 from lumiseval_core.types import MetricCategory, MetricResult
 
 

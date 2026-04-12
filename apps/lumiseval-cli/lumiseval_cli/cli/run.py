@@ -5,10 +5,10 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+from lumiseval_cli.adapters import create_dataset_adapter
 from lumiseval_core.cache import CacheStore, NoOpCacheStore
 from lumiseval_graph.runner import CachedNodeRunner
 
-from lumiseval_cli.adapters import create_dataset_adapter
 from .util import (
     DEFAULT_PRIMARY_LLM,
     _print_llm_routing_summary,

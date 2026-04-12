@@ -7,10 +7,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
-
-from lumiseval_core.types import Item, MetricCategory, Redteam, RedteamMetricInput
 import lumiseval_graph.nodes.metrics.redteam.redteam as redteam_module
+import pytest
+from lumiseval_core.types import Item, MetricCategory, Redteam, RedteamMetricInput
 from lumiseval_graph.nodes.metrics.redteam.redteam import RedteamNode
 
 

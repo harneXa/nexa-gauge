@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from lumiseval_core.types import ChunkArtifacts, CostEstimate, Inputs, Item
 
 

@@ -3,9 +3,8 @@
 # uv run pytest -s packages/lumiseval-graph/test_lumiseval_graph/test_llm/test_gateway.py::test_get_llm_cache_key_changes_with_runtime_override
 # uv run pytest -s -k "llm and gateway" packages/lumiseval-graph/test_lumiseval_graph/test_llm/test_gateway.py
 
-from pydantic import BaseModel
-
 from lumiseval_graph.llm.gateway import _cache, get_llm
+from pydantic import BaseModel
 
 
 class _Schema(BaseModel):

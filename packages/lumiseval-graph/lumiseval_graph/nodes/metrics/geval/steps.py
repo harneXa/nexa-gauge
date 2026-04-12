@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional
 
-from pydantic import BaseModel
-
 from lumiseval_core.types import (
     CostEstimate,
     GevalMetricInput,
@@ -24,6 +22,7 @@ from lumiseval_graph.nodes.metrics.geval.cache import (
     GevalArtifactCache,
     compute_geval_signature,
 )
+from pydantic import BaseModel
 
 log = get_node_logger("geval_steps")
 
