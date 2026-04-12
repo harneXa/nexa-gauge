@@ -3,7 +3,8 @@ from lumiseval_core.geval_cache import (
     collect_geval_signatures,
     compute_geval_signature,
 )
-from lumiseval_core.types import EvalCase, GevalConfig, GevalMetricSpec
+from lumiseval_core.types import GevalConfig, GevalMetricSpec
+from lumiseval_graph.graph import EvalCase
 
 
 def test_compute_geval_signature_changes_with_model_and_criteria() -> None:
