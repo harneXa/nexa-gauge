@@ -52,10 +52,11 @@ COST_FALLBACK_PER_CALL_USD: float = 0.0003
 # without actually running any LLM calls.
 
 # Average tokens in a single extracted claim text.
-AVG_CLAIM_TOKENS: int = 15
+AVG_CLAIM_INPUT_TOKENS: int = 25 + 12  # 25 claims token, and 12 structured LLM output tokens
+AVG_CLAIMS_PER_CHUNK: int = 2  # Average number of claims extracted per chunk
 
 # Average output tokens for a single boolean verdict (grounding): "true"/"false".
-AVG_OUTPUT_TOKENS_BOOLEAN_VERDICT: int = 5
+AVG_CLAIM_OUTPUT_TOKENS_BOOLEAN_VERDICT: int = 7
 
 # Average output tokens for a single JSON relevance verdict:
 # {"verdict": "relevant"} is ~10 tokens.
@@ -63,12 +64,16 @@ AVG_OUTPUT_TOKENS_JSON_VERDICT: int = 10
 
 # DeepEval BiasMetric / ToxicityMetric each make internal LLM calls whose
 # prompts are not directly accessible. These constants approximate that overhead.
-AVG_DEEPEVAL_INPUT_OVERHEAD_TOKENS: int = 350
-AVG_DEEPEVAL_OUTPUT_OVERHEAD_TOKENS: int = 50
+AVG_DEEPEVAL_PROMPT_TOKENS: int = 100
+AVG_DEEPEVAL_OUTPUT_REASONING_TOKENS: int = 50
+AVG_DEEPEVAL_OUTPUT_VERDICT: int = 14
 
-# DeepEval GEval (rubric) constructs a multi-step evaluation prompt per rule.
+
+# DeepEval GEval constructs a multi-step evaluation prompt per metric.
 AVG_GEVAL_INPUT_OVERHEAD_TOKENS: int = 400
 AVG_GEVAL_OUTPUT_OVERHEAD_TOKENS: int = 60
+AVG_DEEPEVAL_GEVAL_CRITERIA_STEPS: int = 3
+AVG_DEEPEVAL_GEVAL_CRITERIA_STEP_TOKENS: int = 40
 
 # ── MMR Claim Deduplication ──────────────────────────────────────────────────
 
@@ -100,7 +105,7 @@ EVIDENCE_VERDICT_UNVERIFIABLE_THRESHOLD: float = 0.4
 # ── Metrics ──────────────────────────────────────────────────────────────────
 
 # Score at or above which a metric is considered "passed".
-# Applied uniformly to hallucination, rubric, and bias metrics.
+# Applied uniformly to hallucination, GEval, and bias metrics.
 METRIC_PASS_THRESHOLD: float = 0.5
 
 # Composite score weights — must sum to 1.0.
@@ -108,7 +113,7 @@ METRIC_PASS_THRESHOLD: float = 0.5
 SCORE_WEIGHT_FAITHFULNESS: float = 0.25
 SCORE_WEIGHT_ANSWER_RELEVANCY: float = 0.20
 SCORE_WEIGHT_HALLUCINATION: float = 0.25
-SCORE_WEIGHT_RUBRIC: float = 0.15
+SCORE_WEIGHT_GEVAL: float = 0.15
 SCORE_WEIGHT_SAFETY: float = 0.10
 SCORE_WEIGHT_EVIDENCE_SUPPORT_RATE: float = 0.05
 

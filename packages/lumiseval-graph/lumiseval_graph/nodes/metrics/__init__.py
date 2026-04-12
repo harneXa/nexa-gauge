@@ -1,3 +1,3 @@
-from lumiseval_graph.nodes.metrics.base import BaseMetricNode
+"""Metric node package."""
 
-__all__ = ["BaseMetricNode"]
+__all__: list[str] = []

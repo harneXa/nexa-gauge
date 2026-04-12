@@ -52,35 +52,61 @@ flowchart LR
 ### 2.1 Graph Node Flow
 
 ```mermaid
-flowchart TD
-  N1["scan"] --> N2["estimate"]
-  N2 --> N3["approve"]
-  N3 --> N4["chunk"]
-  N4 --> N5["claims"]
-  N5 --> N6["dedupe"]
-  
-  N6 --> M1["relevance"]
-  N6 --> M2["grounding"]
-  N3 --> M3["redteam"]
-  N3 --> M4["rubric"]
+flowchart TB
+    subgraph CFG["EvalJobConfig toggles"]
+        GRD["🔒 grounding\nfaithfulness per claim"]
+        T1["enable_grounding"]
+        REL["🔄 relevance\nanswer-relevancy"]
+        T2["enable_relevance"]
+        RDT["🛡️ redteam\nbias + toxicity"]
+        T3["enable_redteam"]
+        GVS["🧭 geval_steps\ncriteria -> eval steps"]
+        GVT["🧠 geval\ncustom GEval metrics"]
+        T4["enable_geval"]
+        REF["📚 reference\nROUGE / BLEU / METEOR"]
+        T5["enable_reference"]
+    end
 
-  M1 --> N8["eval"]
-  M2 --> N8
-  M3 --> N8
-  M4 --> N8
-  N8 --> N9["EvalReport"]
+    SCAN["🔍 scan\ntokenise · count · eligibility"] --> CHK["📄 chunk\n~100-tok windows"]
+    CHK --> CLM["🧩 claims\nextract atomic claims per chunk"]
+    CLM --> DDP["🔀 dedup\nMMR cosine dedup"]
+    SCAN -- has_generation --> RDT
+    SCAN -- has_geval --> GVS
+    GVS --> GVT
+    SCAN -- has_generation and has reference --> REF
+    DDP -- has_question --> REL
+    DDP -- has_context --> GRD
+    REL --> EVL["⭐ eval\naggregate · score · report"]
+    GRD --> EVL
+    RDT --> EVL
+    GVT --> EVL
+    REF --> EVL
+    EVL --> RPT(["📋 EvalReport"])
+    T1 -. controls .-> GRD
+    T2 -. controls .-> REL
+    T3 -. controls .-> RDT
+    T4 -. controls .-> GVS
+    T4 -. controls .-> GVT
+    T5 -. controls .-> REF
 
-  subgraph CFG["Metric Activation from EvalJobConfig"]
-    C2["enable_grounding"]
-    C1["enable_relevance"]
-    C3["enable_redteam"]
-    C4["enable_rubric + rubric"]
-  end
+    GRD:::metric
+    REL:::metric
+    RDT:::metric
+    GVS:::metric
+    GVT:::metric
+    REF:::metric
+    SCAN:::preflight
+    CHK:::ctxpath
+    CLM:::ctxpath
+    DDP:::ctxpath
+    EVL:::agg
+    RPT:::terminal
 
-  C1 -.controls.-> M1
-  C2 -.controls.-> M2
-  C3 -.controls.-> M3
-  C4 -.controls.-> M4
+    classDef preflight fill:#1e3a5f,stroke:#4a9eff,color:#fff
+    classDef ctxpath  fill:#1a3a1a,stroke:#4aaf4a,color:#fff
+    classDef metric   fill:#3a1a3a,stroke:#af4aaf,color:#fff
+    classDef agg      fill:#5a4000,stroke:#d4a017,color:#fff
+    classDef terminal fill:#2a2a2a,stroke:#888,color:#fff
 ```
 
 ### 2.2 Evidence Routing Cascade
@@ -105,24 +131,33 @@ flowchart LR
 ```mermaid
 sequenceDiagram
   actor User
+  participant CLIE as "CLI estimate()"
   participant CLI as "CLI run()"
   participant AD as "create_dataset_adapter()"
   participant DA as "DatasetAdapter.iter_cases()"
   participant SC as "scan_cases()"
+  participant PL as "CachedNodeRunner.plan_dataset()"
   participant ES as "CostEstimator(job_config).estimate()"
   participant CN as "CachedNodeRunner.run_case()"
   participant NF as "node function map"
+
+  User->>CLIE: `lumiseval estimate <target_node> --input ...`
+  CLIE->>AD: resolve local / huggingface adapter
+  AD-->>CLIE: adapter instance
+  CLIE->>DA: iter_cases(split, limit)
+  DA-->>CLIE: EvalCase[]
+  CLIE->>SC: scan selected cases
+  SC-->>CLIE: InputMetadata
+  CLIE->>PL: plan_dataset(cases, target_node)
+  PL-->>CLIE: to_run/cached/skipped by node
+  CLIE->>ES: estimate(delta metadata overrides)
+  ES-->>CLIE: CostReport (rich tables printed)
 
   User->>CLI: `lumiseval run <target_node> --input ...`
   CLI->>AD: resolve local / huggingface adapter
   AD-->>CLI: adapter instance
   CLI->>DA: iter_cases(split, limit)
   DA-->>CLI: EvalCase[]
-  CLI->>SC: scan selected cases
-  SC-->>CLI: InputMetadata
-  CLI->>ES: estimate(scan_meta)
-  ES-->>CLI: CostReport (rich table printed inline)
-  CLI->>User: confirm (unless --yes)
 
   loop each EvalCase
     CLI->>CN: run_case(case, node_name, job_config, force)
@@ -162,7 +197,7 @@ sequenceDiagram
   - `relevance_metrics`
   - `grounding_metrics`
   - `redteam_metrics`
-  - `rubric_metrics`
+  - `geval_metrics`
   - `claim_verdicts` from evidence routing
 - Derived metric:
   - `evidence_support_rate` = proportion of claims with `SUPPORTED` verdict
@@ -180,10 +215,10 @@ All dataset sources are normalized to `EvalCase`:
 - `case_id`
 - `generation` (required)
 - `question` (optional)
-- `ground_truth` (optional)
+- `reference` (optional)
 - `context` (optional list)
 - `reference_files` (optional list)
-- `rubric` (optional list)
+- `geval` (optional object with `metrics[]`)
 - `metadata` (free-form)
 
 This contract is what makes both flows modular:
@@ -193,6 +228,6 @@ This contract is what makes both flows modular:
 ## Current Gaps (Known in Code)
 
 - MCP retrieval is a stub in `retrieve`.
-- API remains synchronous (`POST /jobs` executes inline).
+- API handlers for `/estimate` and `/run` are documented but not implemented yet.
 - `cost_actual_usd` tracking is not fully wired from real LLM usage yet.
 - Persisted jobs/reports storage is not implemented yet.

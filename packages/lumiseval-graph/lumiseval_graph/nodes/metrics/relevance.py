@@ -1,51 +1,33 @@
-# Run smoke test:
-#   python -m lumiseval_graph.nodes.metrics.relevance
-"""
-Claim-level answer relevancy metric.
+"""Claim-level answer relevancy metric node."""
 
-Mirrors the DeepEval AnswerRelevancy pattern:
-  1. Statements are extracted from the response — we skip this step and use the
-     pre-extracted claims from claim_extractor → mmr_deduplicator instead.
-  2. Each claim is classified as "relevant", "irrelevant", or "idk" relative to
-     the original question.
-  3. score = count("relevant") / total_claims
+from typing import Tuple
 
-Using claims (not chunks) as statements because:
-  - Claims are atomic, deduplicated factual propositions — exactly what DeepEval
-    would extract internally with its own LLM call.
-  - Chunks are raw text segments (~512 tokens) that may span multiple statements
-    and include surrounding context that dilutes the relevancy signal.
-"""
-
-from typing import Literal, Optional
-
+from lumiseval_core.constants import (
+    AVG_CLAIM_INPUT_TOKENS,
+    AVG_CLAIM_OUTPUT_TOKENS_BOOLEAN_VERDICT,
+    AVG_CLAIMS_PER_CHUNK,
+)
 from lumiseval_core.types import (
     Claim,
+    CostEstimate,
+    Item,
     MetricCategory,
     MetricResult,
-    NodeCostBreakdown,
-    RelevanceCostMeta,
+    RelevanceMetrics,
     Relevancy,
 )
-from pydantic import BaseModel
-
+from lumiseval_core.utils import _count_tokens, template_static_tokens
 from lumiseval_graph.llm.gateway import get_llm
 from lumiseval_graph.llm.pricing import cost_usd, get_model_pricing
 from lumiseval_graph.log import get_node_logger
-from lumiseval_graph.nodes.metrics.base import BaseMetricNode
-from lumiseval_graph.nodes.metrics.token_utils import count_tokens, template_static_tokens
+from lumiseval_graph.nodes.base import BaseMetricNode
+from pydantic import BaseModel
 
 log = get_node_logger("relevance")
 
-_Verdict = Literal["relevant", "irrelevant", "idk"]
-
-
-class _VerdictItem(BaseModel):
-    verdict: _Verdict
-
 
 class _RelevancyResult(BaseModel):
-    verdicts: list[_VerdictItem]
+    verdicts: list[bool]
 
 
 class RelevanceNode(BaseMetricNode):
@@ -54,175 +36,112 @@ class RelevanceNode(BaseMetricNode):
     USER_PROMPT = (
         "Question: {question}\n\n"
         "Statements extracted from an answer (one per line):\n{claims}\n\n"
-        "For each statement classify its relevance to the question above:\n"
-        "  - 'relevant'   : the statement directly addresses or helps answer the question\n"
-        "  - 'irrelevant' : the statement does not relate to the question\n"
-        "  - 'idk'        : cannot determine relevance (ambiguous or incomplete)\n\n"
-        "Return a JSON object with a single key 'verdicts' containing a list of objects "
-        '{"verdict": "relevant"|"irrelevant"|"idk"} in the same order as the statements.'
+        "For each statement determine whether it is relevant to the question above. "
+        "Return a JSON object with key 'verdicts' containing a list of booleans "
+        "(true = relevant, false = not relevant) in the same order."
     )
+    static_prompt_tokens: int = _count_tokens(SYSTEM_PROMPT) + template_static_tokens(USER_PROMPT)
 
-    # Static (non-placeholder) token overhead shared by every call — computed
-    # once at class definition time from the prompts above.
-    static_prompt_tokens: int = count_tokens(SYSTEM_PROMPT) + template_static_tokens(USER_PROMPT)
+    def _answer_relevancy(
+        self, claims: list[Claim], question: str
+    ) -> Tuple[MetricResult, CostEstimate]:
+        numbered = "\n".join(f"{i + 1}. {c.item.text}" for i, c in enumerate(claims))
+        response = get_llm(
+            "relevance",
+            _RelevancyResult,
+            self.judge_model,
+            llm_overrides=self.llm_overrides,
+        ).invoke(
+            [
+                {"role": "system", "content": self.SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": self.USER_PROMPT.format(question=question, claims=numbered),
+                },
+            ]
+        )
 
-    def _answer_relevancy(self, claims: list[Claim], question: str) -> MetricResult:
-        """Classify each claim as relevant / irrelevant / idk; score = relevant / total."""
-        numbered = "\n".join(f"{i + 1}. {c.text}" for i, c in enumerate(claims))
-        messages = [
-            {"role": "system", "content": self.SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": self.USER_PROMPT.format(question=question, claims=numbered),
-            },
-        ]
-        llm = get_llm("relevance_answer", _RelevancyResult, self.judge_model)
-        response = llm.invoke(messages)
+        pricing = get_model_pricing(self.judge_model)
+        prompt_tokens = float(response["usage"]["prompt_tokens"])
+        completion_tokens = float(response["usage"]["completion_tokens"])
+        cost = CostEstimate(
+            input_tokens=prompt_tokens,
+            output_tokens=completion_tokens,
+            cost=cost_usd(prompt_tokens, pricing, "input")
+            + cost_usd(completion_tokens, pricing, "output"),
+        )
+
         result: _RelevancyResult = response["parsed"]
-
         if result is None or not result.verdicts:
             log.warning("Answer relevancy LLM call returned no verdicts")
-            return MetricResult(
-                name="answer_relevancy",
-                category=MetricCategory.ANSWER,
-                error="No verdicts returned",
+            return (
+                MetricResult(
+                    name="answer_relevancy",
+                    category=MetricCategory.ANSWER,
+                    error="No verdicts returned",
+                ),
+                cost,
             )
 
         verdicts = result.verdicts[: len(claims)]
-        relevant_count = sum(1 for v in verdicts if v.verdict == "relevant")
-        score = relevant_count / len(verdicts)
+        score = sum(verdicts) / len(verdicts)
 
         per_claim = [
-            Relevancy(**c.model_dump(), verdict=v.verdict) for c, v in zip(claims, verdicts)
+            Relevancy(**c.model_dump(), verdict="ACCEPTED" if v else "REJECTED")
+            for c, v in zip(claims, verdicts)
         ]
 
-        log.success(
-            f"answer_relevancy={score:.3f}  "
-            f"(relevant={relevant_count}  irrelevant={sum(1 for v in verdicts if v.verdict == 'irrelevant')}  "
-            f"idk={sum(1 for v in verdicts if v.verdict == 'idk')}  total={len(verdicts)})"
-        )
-        return MetricResult(
-            name="answer_relevancy",
-            category=MetricCategory.ANSWER,
-            score=score,
-            result=per_claim,
+        return (
+            MetricResult(
+                name="answer_relevancy",
+                category=MetricCategory.ANSWER,
+                score=score,
+                result=per_claim,
+            ),
+            cost,
         )
 
     def run(  # type: ignore[override]
         self,
-        *,
         claims: list[Claim],
-        question: Optional[str] = None,
+        question: Item | str | None,
         enable_relevance: bool = True,
-    ) -> list[MetricResult]:
-        """Compute answer relevancy using pre-extracted claims.
+    ) -> RelevanceMetrics:
+        zero_cost = CostEstimate(cost=0.0, input_tokens=None, output_tokens=None)
+        if not claims or not enable_relevance:
+            return RelevanceMetrics(
+                metrics=[],
+                cost=zero_cost,
+            )
 
-        Args:
-            claims:                  Deduplicated claims from the mmr_deduplicator node.
-            question:                Original query — required for answer relevancy.
-            enable_relevance: Whether to compute answer relevancy.
+        if isinstance(question, Item):
+            question_text = question.text
+        else:
+            question_text = question or ""
 
-        Returns:
-            list[MetricResult] — one entry per enabled metric.
-        """
-        if not claims:
-            log.warning("No claims provided — skipping answer relevancy")
-            return []
+        if not question_text.strip():
+            log.info("No question provided — skipping answer relevancy")
+            return RelevanceMetrics(metrics=[], cost=zero_cost)
 
-        results: list[MetricResult] = []
+        result, cost = self._answer_relevancy(claims=claims, question=question_text)
+        return RelevanceMetrics(metrics=[result], cost=cost)
 
-        if enable_relevance:
-            if not question:
-                log.info("No question provided — skipping answer relevancy")
-            else:
-                results.append(self._answer_relevancy(claims, question))
-
-        return results
-
-    def cost_estimate(
-        self,
-        *,
-        cost_meta: RelevanceCostMeta,
-        **_ignored,
-    ) -> NodeCostBreakdown:
-        if cost_meta.eligible_records == 0:
-            return NodeCostBreakdown(model_calls=0, cost_usd=0.0)
-
-        pricing = get_model_pricing(self.judge_model)
-        claims = max(1.0, cost_meta.avg_claims_per_record)
-
+    def estimate(self, question: Item | str | None) -> CostEstimate:
+        question_tokens = (
+            float(question.tokens)
+            if isinstance(question, Item)
+            else float(_count_tokens(question or ""))
+        )
         input_tokens = (
             self.static_prompt_tokens
-            + cost_meta.avg_question_tokens
-            + round(claims * cost_meta.avg_claim_tokens)
+            + question_tokens
+            + AVG_CLAIM_INPUT_TOKENS * AVG_CLAIMS_PER_CHUNK
         )
-        output_tokens = round(claims * cost_meta.avg_output_token)
-
-        cost_per_record = cost_usd(input_tokens, pricing, "input") + cost_usd(
-            output_tokens, pricing, "output"
+        output_tokens = AVG_CLAIM_OUTPUT_TOKENS_BOOLEAN_VERDICT + (AVG_CLAIMS_PER_CHUNK - 1)
+        pricing = get_model_pricing(self.judge_model)
+        return CostEstimate(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost=cost_usd(input_tokens, pricing, "input")
+            + cost_usd(output_tokens, pricing, "output"),
         )
-        return NodeCostBreakdown(
-            model_calls=cost_meta.eligible_records,
-            cost_usd=round(cost_meta.eligible_records * cost_per_record, 6),
-        )
-
-    @classmethod
-    def cost_formula(cls, cost_meta: RelevanceCostMeta) -> str:
-        claims = max(1.0, cost_meta.avg_claims_per_record)
-        prompt_t = cls.static_prompt_tokens
-        q_t = round(cost_meta.avg_question_tokens)
-        claims_t = round(claims * cost_meta.avg_claim_tokens)
-        input_t = prompt_t + q_t + claims_t
-        output_t = round(claims * cost_meta.avg_output_token)
-        return (
-            f"{cost_meta.eligible_records} recs, 1 call/rec (all claims batched), {cost_meta.eligible_records} calls\n"
-            f"  input_tokens  = {prompt_t} (prompt) + {q_t} (question) + {claims_t} ({claims:.1f} claims × {round(cost_meta.avg_claim_tokens)}t) = {input_t} tok/call\n"
-            f"  output_tokens = {output_t} ({claims:.1f} claims × {round(cost_meta.avg_output_token)}t json_verdict) = {output_t} tok/call"
-        )
-
-
-# ── Manual smoke test ─────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    """
-    Real answer relevancy test — mirrors DeepEval's verdict-based approach.
-
-    Question: "What causes type 2 diabetes?"
-
-    Claims:
-      - claim_1 → relevant   (insulin resistance is a direct cause)
-      - claim_2 → relevant   (obesity is a known contributing factor)
-      - claim_3 → irrelevant (peripheral neuropathy is a complication, not a cause)
-      - claim_4 → irrelevant (transformer architecture is off-topic)
-
-    Expected score: 2/4 = 0.5
-    """
-    claims = [
-        Claim(
-            text="Insulin resistance in muscle and fat cells causes blood glucose to remain elevated.",
-            source_chunk_index=0,
-            confidence=0.95,
-        ),
-        Claim(
-            text="Excess body weight, particularly visceral fat, is a major contributing factor to type 2 diabetes.",
-            source_chunk_index=0,
-            confidence=0.90,
-        ),
-        Claim(
-            text="Poorly controlled type 2 diabetes can lead to peripheral neuropathy over time.",
-            source_chunk_index=1,
-            confidence=0.85,
-        ),
-        Claim(
-            text="The Transformer model uses multi-head self-attention to process token sequences in parallel.",
-            source_chunk_index=2,
-            confidence=0.80,
-        ),
-    ]
-
-    question = "What causes type 2 diabetes?"
-    node = RelevanceNode(judge_model="gpt-4o-mini")
-    print(repr(node))
-    results = node.run(claims=claims, question=question)
-    for r in results:
-        print("result:", r)
