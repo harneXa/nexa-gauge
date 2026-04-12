@@ -14,7 +14,6 @@ def test_normalize_node_name_aliases() -> None:
     assert normalize_node_name("node_grounding") == "grounding"
 
 
-
 def test_get_judge_model_prefers_runtime_over_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_CLAIMS_MODEL", "env-claims-model")
 
@@ -26,12 +25,8 @@ def test_get_judge_model_prefers_runtime_over_env(monkeypatch: pytest.MonkeyPatc
     assert model == "runtime-claims-model"
 
 
-
 def test_get_judge_model_uses_env_before_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_RELEVANCE_MODEL", "env-relevance-model")
 
     model = get_judge_model("relevance", "default-model")
     assert model == "env-relevance-model"
-
-
-

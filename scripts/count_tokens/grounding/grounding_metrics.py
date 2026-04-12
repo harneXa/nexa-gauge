@@ -44,13 +44,15 @@ def main():
                 }
                 for r in metric.get("result", [])
             ]
-            parsed_metrics.append({
-                "name": metric.get("name"),
-                "category": metric.get("category"),
-                "score": metric.get("score"),
-                "error": metric.get("error"),
-                "claims": claims,
-            })
+            parsed_metrics.append(
+                {
+                    "name": metric.get("name"),
+                    "category": metric.get("category"),
+                    "score": metric.get("score"),
+                    "error": metric.get("error"),
+                    "claims": claims,
+                }
+            )
 
         record_entry = {
             "case_id": case_id,
@@ -71,7 +73,9 @@ def main():
         print(f"input_tokens={input_tokens}, output_tokens={output_tokens}, cost={cost:.9f}")
         if parsed_metrics:
             for metric in parsed_metrics:
-                print(f"  metric={metric['name']}  category={metric['category']}  score={metric['score']}")
+                print(
+                    f"  metric={metric['name']}  category={metric['category']}  score={metric['score']}"
+                )
                 for claim in metric["claims"]:
                     print(f"    claim_text    = {claim['text']}")
                     print(f"    claim_tokens  = {claim['tokens']}")
@@ -82,7 +86,9 @@ def main():
         print()
 
     print("=" * 60)
-    print(f"TOTAL: input_tokens={total_input_tokens}, output_tokens={total_output_tokens}, cost={total_cost:.9f}")
+    print(
+        f"TOTAL: input_tokens={total_input_tokens}, output_tokens={total_output_tokens}, cost={total_cost:.9f}"
+    )
 
     result = {
         "total": {

@@ -14,13 +14,9 @@ from .constants import TIKTOKEN_ENCODING
 
 _ENCODER = tiktoken.get_encoding(TIKTOKEN_ENCODING)
 
+
 def _count_tokens(text: str) -> int:
     return len(_ENCODER.encode(text))
-
-
-
-
-
 
 
 # Matches str.format() style placeholders: {context}, {claims}, {question}, etc.

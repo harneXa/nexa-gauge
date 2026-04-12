@@ -67,7 +67,9 @@ def main():
         print()
 
     print("=" * 60)
-    print(f"TOTAL: input_tokens={total_input_tokens}, output_tokens={total_output_tokens}, cost={total_cost:.9f}")
+    print(
+        f"TOTAL: input_tokens={total_input_tokens}, output_tokens={total_output_tokens}, cost={total_cost:.9f}"
+    )
 
     result = {
         "total": {

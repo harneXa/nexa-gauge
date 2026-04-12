@@ -36,9 +36,7 @@ class _FakeGEvalResponse:
         self.evaluation_cost = 0.0
 
     def measure(self, _test_case):
-        response = SimpleNamespace(
-            usage=SimpleNamespace(prompt_tokens=80, completion_tokens=20)
-        )
+        response = SimpleNamespace(usage=SimpleNamespace(prompt_tokens=80, completion_tokens=20))
         self.model.calculate_cost(response)
         self.evaluation_cost = 0.01
 

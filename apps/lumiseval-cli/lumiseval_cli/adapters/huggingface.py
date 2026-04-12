@@ -54,7 +54,9 @@ class HuggingFaceDatasetAdapter(DatasetAdapter):
             try:
                 yield row
             except InputParseError as exc:
-                if "missing required generation/response/answer/output/completion field." in str(exc):
+                if "missing required generation/response/answer/output/completion field." in str(
+                    exc
+                ):
                     raise InputParseError(
                         (
                             f"Dataset '{self.dataset_id}' split '{split}' row {idx} has no generation-like field. "

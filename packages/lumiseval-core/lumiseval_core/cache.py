@@ -89,11 +89,9 @@ class KVCacheEntry(TypedDict):
 class NodeCacheBackend(Protocol):
     """Minimal cache backend contract used by CachedNodeRunner."""
 
-    def has_key(self, cache_key: str) -> bool:
-        ...
+    def has_key(self, cache_key: str) -> bool: ...
 
-    def get_entry_by_key(self, cache_key: str) -> Optional[KVCacheEntry]:
-        ...
+    def get_entry_by_key(self, cache_key: str) -> Optional[KVCacheEntry]: ...
 
     def put_by_key(
         self,
@@ -101,8 +99,7 @@ class NodeCacheBackend(Protocol):
         node_name: str,
         node_output: dict[str, Any],
         metadata: Optional[dict[str, Any]] = None,
-    ) -> None:
-        ...
+    ) -> None: ...
 
 
 # ── Serialisation helpers ────────────────────────────────────────────────────
@@ -110,6 +107,7 @@ class NodeCacheBackend(Protocol):
 
 def _serialize(node_output: dict[str, Any]) -> dict[str, Any]:
     """Convert a node output dict to a JSON-serialisable form."""
+
     def _to_jsonable(value: Any) -> Any:
         if value is None:
             return None
@@ -213,6 +211,7 @@ def compute_case_hash(
     reference_files produces a different hash, which causes
     a cache miss for the affected case.
     """
+
     def _value(obj: Any, key: str, default: Any = None) -> Any:
         if isinstance(obj, dict):
             return obj.get(key, default)

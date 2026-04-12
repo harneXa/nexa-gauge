@@ -105,8 +105,7 @@ def run(
         "--max-in-flight",
         min=1,
         help=(
-            "Maximum number of submitted-but-not-yet-emitted records. "
-            "Defaults to max_workers * 2."
+            "Maximum number of submitted-but-not-yet-emitted records. Defaults to max_workers * 2."
         ),
     ),
     force: bool = typer.Option(False, "--force", help="Ignore cache reads (still writes)."),

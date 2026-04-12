@@ -81,9 +81,7 @@ def _parse_model_overrides(
             )
         if node not in NODES_BY_NAME:
             valid = ", ".join(NODE_ORDER)
-            raise ValueError(
-                f"Unknown node '{raw_node}' in {option_name}. Valid options: {valid}."
-            )
+            raise ValueError(f"Unknown node '{raw_node}' in {option_name}. Valid options: {valid}.")
         if node in node_models and node_models[node] != model:
             warnings.append(
                 f"{option_name}: duplicate override for '{node}', last value '{model}' wins."
@@ -147,7 +145,11 @@ def _resolve_runtime_llm_overrides(
             continue
         resolved_fallbacks[node] = model
 
-    return global_primary, {"models": resolved_models, "fallback_models": resolved_fallbacks}, warnings
+    return (
+        global_primary,
+        {"models": resolved_models, "fallback_models": resolved_fallbacks},
+        warnings,
+    )
 
 
 def _set_case_llm_overrides(case: Any, llm_overrides: dict[str, dict[str, str]]) -> Any:
@@ -249,7 +251,9 @@ def _collect_estimate_rows(
 ) -> list[tuple[str, str, str, str, str, str, str, float]]:
     rows: list[tuple[str, str, str, str, str, str, str, float]] = []
     for node_name in _plan_nodes_for_target(target_node):
-        est = cost_by_node.get(node_name) or CostEstimate(cost=0.0, input_tokens=None, output_tokens=None)
+        est = cost_by_node.get(node_name) or CostEstimate(
+            cost=0.0, input_tokens=None, output_tokens=None
+        )
         node_cost = float(est.cost or 0.0)
         stats = node_stats.get(node_name) or {}
         executed = int(stats.get("executed", 0))
@@ -257,9 +261,7 @@ def _collect_estimate_rows(
         estimated = int(stats.get("estimated", 0))
         eligible_uncached = int(stats.get("eligible_uncached", 0))
         eligible_pct = (
-            (eligible_uncached / total_selected_cases * 100.0)
-            if total_selected_cases > 0
-            else 0.0
+            (eligible_uncached / total_selected_cases * 100.0) if total_selected_cases > 0 else 0.0
         )
         status = _resolve_estimate_node_status(
             node_cost=node_cost,

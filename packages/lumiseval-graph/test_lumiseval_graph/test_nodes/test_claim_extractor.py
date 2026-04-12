@@ -55,7 +55,7 @@ def test_run_builds_claim_artifacts_with_mocked_llm(monkeypatch: pytest.MonkeyPa
     assert result.claims[1].source_chunk_index == 1
 
     assert result.cost.input_tokens == 200  # 100 per chunk * 2 chunks
-    assert result.cost.output_tokens == 50   # 25 per chunk * 2 chunks
+    assert result.cost.output_tokens == 50  # 25 per chunk * 2 chunks
     assert result.cost.cost > 0
 
 

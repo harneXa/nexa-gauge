@@ -29,8 +29,13 @@ def test_scan_builds_inputs_with_primary_keys() -> None:
     inputs = result["inputs"]
     assert inputs.generation.text == "Paris is the capital of France."
     assert inputs.question is not None and inputs.question.text == "What is the capital of France?"
-    assert inputs.reference is not None and inputs.reference.text == "The capital of France is Paris."
-    assert inputs.context is not None and inputs.context.text == "France has Paris as its capital city."
+    assert (
+        inputs.reference is not None and inputs.reference.text == "The capital of France is Paris."
+    )
+    assert (
+        inputs.context is not None
+        and inputs.context.text == "France has Paris as its capital city."
+    )
     assert inputs.geval is None
 
     assert inputs.has_generation is True

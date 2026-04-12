@@ -242,7 +242,9 @@ def _build_inputs(record: Mapping[str, Any], *, idx: int = 0) -> Inputs:
     reference_text = _normalize_text(
         _pick_first(record, ["reference", "ground_truth", "gold_answer", "label"])
     )
-    context_text = _normalize_context_text(_pick_first(record, ["context", "contexts", "documents"]))
+    context_text = _normalize_context_text(
+        _pick_first(record, ["context", "contexts", "documents"])
+    )
     geval = _build_geval(_pick_first(record, ["geval"]))
     redteam = _build_redteam(_pick_first(record, ["redteam"]))
 
@@ -283,7 +285,9 @@ def scan(
     """Fill and return graph EvalCase.inputs from one raw record."""
 
     result: GraphEvalCase = dict(case) if case is not None else {}
-    result.setdefault("case_id", _normalize_text(_pick_first(record, ["case_id", "id"], f"record-{idx}")))
+    result.setdefault(
+        "case_id", _normalize_text(_pick_first(record, ["case_id", "id"], f"record-{idx}"))
+    )
     result.setdefault("dataset", DEFAULT_DATASET_NAME)
     result.setdefault("split", DEFAULT_SPLIT)
     result.setdefault("reference_files", [])
@@ -306,5 +310,6 @@ def scan_file_record(path: str | Path, idx: int = 0) -> GraphEvalCase:
 
 if __name__ == "__main__":
     from lumiseval_core.utils import pprint_model
+
     result = scan_file_record(path="sample.json", idx=5)
     pprint_model(result)

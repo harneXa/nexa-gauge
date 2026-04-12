@@ -6,7 +6,7 @@ from lumiseval_cli.adapters.local_file import LocalFileDatasetAdapter
 def test_jsonl_limit_does_not_parse_rows_beyond_window(tmp_path) -> None:
     path = tmp_path / "cases.jsonl"
     path.write_text(
-        '\n'.join(
+        "\n".join(
             [
                 '{"case_id":"a","generation":"hello"}',
                 "{not-json",

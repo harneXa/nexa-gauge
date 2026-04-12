@@ -44,7 +44,9 @@ def _install_fake_pipeline_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
                 return {"grounding_marker": None}
             return {
                 "grounding_marker": "estimated-grounding",
-                "estimated_costs": {"grounding": CostEstimate(cost=0.3, input_tokens=12, output_tokens=3)},
+                "estimated_costs": {
+                    "grounding": CostEstimate(cost=0.3, input_tokens=12, output_tokens=3)
+                },
             }
         return {"grounding_marker": "run-grounding" if has_context else None}
 
@@ -52,7 +54,9 @@ def _install_fake_pipeline_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
         if state.get("execution_mode") == "estimate":
             return {
                 "relevance_marker": "estimated-relevance",
-                "estimated_costs": {"relevance": CostEstimate(cost=0.1, input_tokens=5, output_tokens=1)},
+                "estimated_costs": {
+                    "relevance": CostEstimate(cost=0.1, input_tokens=5, output_tokens=1)
+                },
             }
         return {"relevance_marker": "run-relevance"}
 
@@ -60,7 +64,9 @@ def _install_fake_pipeline_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
         if state.get("execution_mode") == "estimate":
             return {
                 "redteam_marker": "estimated-redteam",
-                "estimated_costs": {"redteam": CostEstimate(cost=0.1, input_tokens=5, output_tokens=1)},
+                "estimated_costs": {
+                    "redteam": CostEstimate(cost=0.1, input_tokens=5, output_tokens=1)
+                },
             }
         return {"redteam_marker": "run-redteam"}
 
@@ -227,7 +233,9 @@ def test_estimate_mode_only_executes_for_uncached_new_records(monkeypatch, tmp_p
         if state.get("execution_mode") == "estimate":
             return {
                 "chunk_marker": "chunked",
-                "estimated_costs": {"chunk": CostEstimate(cost=0.1, input_tokens=5, output_tokens=1)},
+                "estimated_costs": {
+                    "chunk": CostEstimate(cost=0.1, input_tokens=5, output_tokens=1)
+                },
             }
         return {"chunk_marker": "chunked"}
 
@@ -235,7 +243,9 @@ def test_estimate_mode_only_executes_for_uncached_new_records(monkeypatch, tmp_p
         if state.get("execution_mode") == "estimate":
             return {
                 "claims_marker": "claims",
-                "estimated_costs": {"claims": CostEstimate(cost=0.2, input_tokens=8, output_tokens=2)},
+                "estimated_costs": {
+                    "claims": CostEstimate(cost=0.2, input_tokens=8, output_tokens=2)
+                },
             }
         return {"claims_marker": "claims"}
 
@@ -243,7 +253,9 @@ def test_estimate_mode_only_executes_for_uncached_new_records(monkeypatch, tmp_p
         if state.get("execution_mode") == "estimate":
             return {
                 "dedup_marker": "dedup",
-                "estimated_costs": {"dedup": CostEstimate(cost=0.0, input_tokens=0, output_tokens=0)},
+                "estimated_costs": {
+                    "dedup": CostEstimate(cost=0.0, input_tokens=0, output_tokens=0)
+                },
             }
         return {"dedup_marker": "dedup"}
 
@@ -298,19 +310,25 @@ def test_eval_estimate_mode_merges_parallel_metric_estimated_costs(monkeypatch) 
     def _relevance(_state: dict) -> dict:
         return {
             "relevance_metrics": "estimated-relevance",
-            "estimated_costs": {"relevance": CostEstimate(cost=0.11, input_tokens=3, output_tokens=1)},
+            "estimated_costs": {
+                "relevance": CostEstimate(cost=0.11, input_tokens=3, output_tokens=1)
+            },
         }
 
     def _grounding(_state: dict) -> dict:
         return {
             "grounding_metrics": "estimated-grounding",
-            "estimated_costs": {"grounding": CostEstimate(cost=0.22, input_tokens=4, output_tokens=1)},
+            "estimated_costs": {
+                "grounding": CostEstimate(cost=0.22, input_tokens=4, output_tokens=1)
+            },
         }
 
     def _redteam(_state: dict) -> dict:
         return {
             "redteam_metrics": "estimated-redteam",
-            "estimated_costs": {"redteam": CostEstimate(cost=0.33, input_tokens=5, output_tokens=2)},
+            "estimated_costs": {
+                "redteam": CostEstimate(cost=0.33, input_tokens=5, output_tokens=2)
+            },
         }
 
     def _geval(_state: dict) -> dict:
@@ -322,7 +340,9 @@ def test_eval_estimate_mode_merges_parallel_metric_estimated_costs(monkeypatch) 
     def _reference(_state: dict) -> dict:
         return {
             "reference_metrics": "estimated-reference",
-            "estimated_costs": {"reference": CostEstimate(cost=0.0, input_tokens=0, output_tokens=0)},
+            "estimated_costs": {
+                "reference": CostEstimate(cost=0.0, input_tokens=0, output_tokens=0)
+            },
         }
 
     monkeypatch.setitem(runner_module.NODE_FNS, "scan", _ok)
@@ -389,8 +409,12 @@ def test_estimate_mode_does_not_write_cache_by_default(monkeypatch, tmp_path) ->
     runner = CachedNodeRunner(cache_store=CacheStore(tmp_path))
     case = {"case_id": "case-estimate", "generation": "fresh text"}
 
-    first = runner.run_case(case=case, node_name="grounding", execution_mode="estimate", force=False)
-    second = runner.run_case(case=case, node_name="grounding", execution_mode="estimate", force=False)
+    first = runner.run_case(
+        case=case, node_name="grounding", execution_mode="estimate", force=False
+    )
+    second = runner.run_case(
+        case=case, node_name="grounding", execution_mode="estimate", force=False
+    )
 
     assert "grounding" in first.executed_nodes
     assert "grounding" in second.executed_nodes
@@ -459,7 +483,12 @@ def test_eval_estimate_executes_grounding_when_case_content_changes(
     _install_fake_pipeline_nodes(monkeypatch)
 
     runner = CachedNodeRunner(cache_store=CacheStore(isolated_cache_dir))
-    run_case = {"case_id": "case-0", "generation": "same text", "question": "q", "context": ["ctx-0"]}
+    run_case = {
+        "case_id": "case-0",
+        "generation": "same text",
+        "question": "q",
+        "context": ["ctx-0"],
+    }
     changed_case = {
         "case_id": "case-0",
         "generation": "same text with update",

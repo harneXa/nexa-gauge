@@ -102,21 +102,30 @@ from lumiseval_graph.llm.config import (
 )
 
 _C = {
-    "reset":  "\033[0m",
-    "bold":   "\033[1m",
-    "header": "\033[95m",   # bright magenta  — record banner
-    "node":   "\033[94m",   # bright blue     — node name
-    "key":    "\033[96m",   # bright cyan     — dict key
-    "value":  "\033[92m",   # bright green    — value preview
-    "none":   "\033[90m",   # grey            — None / empty
-    "sep":    "\033[33m",   # yellow          — separator lines
-    "skip":   "\033[90m",   # grey            — verbose artifacts
+    "reset": "\033[0m",
+    "bold": "\033[1m",
+    "header": "\033[95m",  # bright magenta  — record banner
+    "node": "\033[94m",  # bright blue     — node name
+    "key": "\033[96m",  # bright cyan     — dict key
+    "value": "\033[92m",  # bright green    — value preview
+    "none": "\033[90m",  # grey            — None / empty
+    "sep": "\033[33m",  # yellow          — separator lines
+    "skip": "\033[90m",  # grey            — verbose artifacts
 }
 
+
 def build_graph(
-      enabled_metrics: set[str] | None = None,
-  ) -> StateGraph:
-    run = enabled_metrics or {"claims", "grounding", "relevance", "redteam", "geval_steps", "geval", "reference"}
+    enabled_metrics: set[str] | None = None,
+) -> StateGraph:
+    run = enabled_metrics or {
+        "claims",
+        "grounding",
+        "relevance",
+        "redteam",
+        "geval_steps",
+        "geval",
+        "reference",
+    }
     print("runrunrunrun: ", run)
 
     g = StateGraph(EvalCase)
@@ -129,18 +138,18 @@ def build_graph(
 
     # Claims branch — only when grounding or relevance is requested
     if "claims" in run or "grounding" in run or "relevance" in run:
-      g.add_node("generation_chunk", node_generation_chunk)
-      g.add_node("generation_claims", node_generation_claims)
-      g.add_node("generation_claims_dedup", node_generation_claims_dedup)
-      g.add_edge("metadata_scanner", "generation_chunk")
-      g.add_edge("generation_chunk", "generation_claims")
-      g.add_edge("generation_claims", "generation_claims_dedup")
+        g.add_node("generation_chunk", node_generation_chunk)
+        g.add_node("generation_claims", node_generation_claims)
+        g.add_node("generation_claims_dedup", node_generation_claims_dedup)
+        g.add_edge("metadata_scanner", "generation_chunk")
+        g.add_edge("generation_chunk", "generation_claims")
+        g.add_edge("generation_claims", "generation_claims_dedup")
 
-      for name, node_fn in [("grounding", node_grounding), ("relevance", node_relevance)]:
-          if name in run:
-              g.add_node(name, node_fn)
-              g.add_edge("generation_claims_dedup", name)
-              g.add_edge(name, "eval")
+        for name, node_fn in [("grounding", node_grounding), ("relevance", node_relevance)]:
+            if name in run:
+                g.add_node(name, node_fn)
+                g.add_edge("generation_claims_dedup", name)
+                g.add_edge(name, "eval")
 
     # Geval — needs its own steps node upstream, branches off scanner
     if "geval" in run:
@@ -216,6 +225,7 @@ def _build_llm_overrides(
 
 # ── Dataset runner ─────────────────────────────────────────────────────────
 
+
 def run_dataset(
     input_path: str | Path,
     *,
@@ -277,7 +287,9 @@ if __name__ == "__main__":
     parser.add_argument("input", nargs="?", default="sample.json", help="Path to input JSON file")
     parser.add_argument("--start", type=int, default=0, help="Start record index")
     parser.add_argument("--end", type=int, default=None, help="End record index (exclusive)")
-    parser.add_argument("--node", type=str, default=None, help="Only print output for this node name")
+    parser.add_argument(
+        "--node", type=str, default=None, help="Only print output for this node name"
+    )
     parser.add_argument(
         "--llm-model",
         action="append",
@@ -321,4 +333,3 @@ if __name__ == "__main__":
   8382be2ebb83986d  ------------ \ntext = The Eiffel Tower is a wrought-iron ....
   input_tokens=285.0, output_tokens=28, cost=0.000005955". Write me the script here /Volumes/Raid1CrucialHD/sardhendu/workspace/lumis-eval/scripts/count_tokens
 """
-

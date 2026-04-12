@@ -48,9 +48,11 @@ from .observability import observe
 
 logger = logging.getLogger(__name__)
 
+
 # ── Graph state ────────────────────────────────────────────────────────────
 class EvalCase(TypedDict):
     """Canonical dataset row used by adapters and dataset runners."""
+
     # Required
     record: dict[str, str]
     llm_overrides: Optional[Mapping[str, Any]]
@@ -153,9 +155,7 @@ def node_generation_chunk(state: EvalCase) -> dict[str, Any]:
     if not should_run:
         return {"generation_chunk": None}
 
-    node = ChunkExtractorNode(
-        chunk_size=GENERATION_CHUNK_SIZE_TOKENS
-    )
+    node = ChunkExtractorNode(chunk_size=GENERATION_CHUNK_SIZE_TOKENS)
     if estimate_mode:
         chunk_artifact = node.run(item=inputs.generation)
         return {

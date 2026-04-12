@@ -42,7 +42,9 @@ class RelevanceNode(BaseMetricNode):
     )
     static_prompt_tokens: int = _count_tokens(SYSTEM_PROMPT) + template_static_tokens(USER_PROMPT)
 
-    def _answer_relevancy(self, claims: list[Claim], question: str) -> Tuple[MetricResult, CostEstimate]:
+    def _answer_relevancy(
+        self, claims: list[Claim], question: str
+    ) -> Tuple[MetricResult, CostEstimate]:
         numbered = "\n".join(f"{i + 1}. {c.item.text}" for i, c in enumerate(claims))
         response = get_llm(
             "relevance",
@@ -52,7 +54,10 @@ class RelevanceNode(BaseMetricNode):
         ).invoke(
             [
                 {"role": "system", "content": self.SYSTEM_PROMPT},
-                {"role": "user", "content": self.USER_PROMPT.format(question=question, claims=numbered)},
+                {
+                    "role": "user",
+                    "content": self.USER_PROMPT.format(question=question, claims=numbered),
+                },
             ]
         )
 
@@ -62,7 +67,8 @@ class RelevanceNode(BaseMetricNode):
         cost = CostEstimate(
             input_tokens=prompt_tokens,
             output_tokens=completion_tokens,
-            cost=cost_usd(prompt_tokens, pricing, "input") + cost_usd(completion_tokens, pricing, "output"),
+            cost=cost_usd(prompt_tokens, pricing, "input")
+            + cost_usd(completion_tokens, pricing, "output"),
         )
 
         result: _RelevancyResult = response["parsed"]
@@ -136,5 +142,6 @@ class RelevanceNode(BaseMetricNode):
         return CostEstimate(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cost=cost_usd(input_tokens, pricing, "input") + cost_usd(output_tokens, pricing, "output"),
+            cost=cost_usd(input_tokens, pricing, "input")
+            + cost_usd(output_tokens, pricing, "output"),
         )

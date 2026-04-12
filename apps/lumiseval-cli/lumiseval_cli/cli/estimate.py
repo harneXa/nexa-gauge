@@ -101,8 +101,7 @@ def estimate(
         "--max-in-flight",
         min=1,
         help=(
-            "Maximum number of submitted-but-not-yet-emitted records. "
-            "Defaults to max_workers * 2."
+            "Maximum number of submitted-but-not-yet-emitted records. Defaults to max_workers * 2."
         ),
     ),
     force: bool = typer.Option(False, "--force", help="Ignore cache reads (still writes)."),
@@ -207,15 +206,23 @@ def estimate(
             if existing is None:
                 aggregated_costs[step] = CostEstimate(
                     cost=float(cost_obj.cost or 0.0),
-                    input_tokens=float(cost_obj.input_tokens) if cost_obj.input_tokens is not None else None,
-                    output_tokens=float(cost_obj.output_tokens) if cost_obj.output_tokens is not None else None,
+                    input_tokens=float(cost_obj.input_tokens)
+                    if cost_obj.input_tokens is not None
+                    else None,
+                    output_tokens=float(cost_obj.output_tokens)
+                    if cost_obj.output_tokens is not None
+                    else None,
                 )
                 continue
             existing.cost = float(existing.cost or 0.0) + float(cost_obj.cost or 0.0)
             if cost_obj.input_tokens is not None:
-                existing.input_tokens = float(existing.input_tokens or 0.0) + float(cost_obj.input_tokens)
+                existing.input_tokens = float(existing.input_tokens or 0.0) + float(
+                    cost_obj.input_tokens
+                )
             if cost_obj.output_tokens is not None:
-                existing.output_tokens = float(existing.output_tokens or 0.0) + float(cost_obj.output_tokens)
+                existing.output_tokens = float(existing.output_tokens or 0.0) + float(
+                    cost_obj.output_tokens
+                )
     # except ValueError as exc:
     #     console.print(f"[red]{exc}[/red]")
     #     raise typer.Exit(1)

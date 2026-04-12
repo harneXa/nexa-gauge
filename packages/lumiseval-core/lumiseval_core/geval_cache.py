@@ -129,7 +129,9 @@ class GevalArtifactCache:
             "criteria": criteria,
             "prompt_version": prompt_version,
             "parser_version": parser_version,
-            "evaluation_steps": [str(step).strip() for step in evaluation_steps if str(step).strip()],
+            "evaluation_steps": [
+                str(step).strip() for step in evaluation_steps if str(step).strip()
+            ],
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

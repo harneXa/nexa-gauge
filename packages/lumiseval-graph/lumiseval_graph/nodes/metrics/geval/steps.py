@@ -105,11 +105,15 @@ class GevalStepsNode(BaseMetricNode):
         )
 
         parsed: _GevalStepsResponse | None = response["parsed"]
-        raw_steps = [s.strip() for s in (parsed.evaluation_steps if parsed else []) if s and s.strip()]
+        raw_steps = [
+            s.strip() for s in (parsed.evaluation_steps if parsed else []) if s and s.strip()
+        ]
         if not raw_steps:
             raise RuntimeError(f"GEval steps generation failed for metric '{metric_name}'.")
 
-        steps = [Item(text=step, tokens=float(_count_tokens(step)), cached=False) for step in raw_steps]
+        steps = [
+            Item(text=step, tokens=float(_count_tokens(step)), cached=False) for step in raw_steps
+        ]
         return steps, cost
 
     def run(  # type: ignore[override]
@@ -133,7 +137,9 @@ class GevalStepsNode(BaseMetricNode):
                         key=key,
                         name=metric.name,
                         item_fields=list(metric.item_fields),
-                        evaluation_steps=[Item(**step.model_dump()) for step in metric.evaluation_steps],
+                        evaluation_steps=[
+                            Item(**step.model_dump()) for step in metric.evaluation_steps
+                        ],
                         steps_source="provided",
                         signature=None,
                     )
@@ -170,7 +176,9 @@ class GevalStepsNode(BaseMetricNode):
                 signature=signature,
                 model=self.judge_model,
                 criteria=metric.criteria
-                or Item(text=criteria_text, tokens=float(_count_tokens(criteria_text)), cached=False),
+                or Item(
+                    text=criteria_text, tokens=float(_count_tokens(criteria_text)), cached=False
+                ),
                 evaluation_steps=generated_steps,
                 prompt_version=self.prompt_version,
                 parser_version=self.parser_version,
@@ -205,5 +213,6 @@ class GevalStepsNode(BaseMetricNode):
         return CostEstimate(
             input_tokens=billable_input,
             output_tokens=output_tokens,
-            cost=cost_usd(billable_input, pricing, "input") + cost_usd(output_tokens, pricing, "output"),
+            cost=cost_usd(billable_input, pricing, "input")
+            + cost_usd(output_tokens, pricing, "output"),
         )

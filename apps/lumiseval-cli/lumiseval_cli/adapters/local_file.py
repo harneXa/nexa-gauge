@@ -54,9 +54,13 @@ class LocalFileDatasetAdapter(DatasetAdapter):
                     try:
                         item = json.loads(line)
                     except json.JSONDecodeError as exc:
-                        raise InputParseError(f"Invalid JSONL at line {line_idx + 1}: {exc}") from exc
+                        raise InputParseError(
+                            f"Invalid JSONL at line {line_idx + 1}: {exc}"
+                        ) from exc
                     if not isinstance(item, dict):
-                        raise InputParseError(f"JSONL line {line_idx + 1} must decode to an object.")
+                        raise InputParseError(
+                            f"JSONL line {line_idx + 1} must decode to an object."
+                        )
                     yield item
             return
 

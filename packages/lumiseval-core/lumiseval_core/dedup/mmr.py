@@ -90,4 +90,3 @@ def deduplicate(
 
     unique_items: list[Item] = [items[i] for i in selected_indices]
     return unique_items, dedup_map
-

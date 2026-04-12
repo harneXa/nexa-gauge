@@ -151,14 +151,18 @@ class GevalNode(BaseMetricNode):
         if inspect.iscoroutinefunction(calculate_cost):
 
             async def _wrapped_calculate_cost(*args: Any, **kwargs: Any) -> Any:
-                input_tokens, output_tokens = cls._extract_tokens_from_calculate_cost_call(args, kwargs)
+                input_tokens, output_tokens = cls._extract_tokens_from_calculate_cost_call(
+                    args, kwargs
+                )
                 usage.add(input_tokens, output_tokens)
                 return await calculate_cost(*args, **kwargs)
 
         else:
 
             def _wrapped_calculate_cost(*args: Any, **kwargs: Any) -> Any:
-                input_tokens, output_tokens = cls._extract_tokens_from_calculate_cost_call(args, kwargs)
+                input_tokens, output_tokens = cls._extract_tokens_from_calculate_cost_call(
+                    args, kwargs
+                )
                 usage.add(input_tokens, output_tokens)
                 return calculate_cost(*args, **kwargs)
 
@@ -174,7 +178,9 @@ class GevalNode(BaseMetricNode):
         context: Optional[str],
     ) -> _EvaluationResult:
         """Run one GEval scoring call for a single resolved metric."""
-        evaluation_steps = [step.text.strip() for step in metric.evaluation_steps if step.text.strip()]
+        evaluation_steps = [
+            step.text.strip() for step in metric.evaluation_steps if step.text.strip()
+        ]
         if not evaluation_steps:
             return _EvaluationResult(
                 metric=MetricResult(
@@ -210,7 +216,13 @@ class GevalNode(BaseMetricNode):
                 name=metric.name,
                 category=MetricCategory.ANSWER,
                 score=score,
-                result=[{"passed": score >= METRIC_PASS_THRESHOLD, "reasoning": g_eval.reason or "", "tokens": _count_tokens(g_eval.reason or "")}],
+                result=[
+                    {
+                        "passed": score >= METRIC_PASS_THRESHOLD,
+                        "reasoning": g_eval.reason or "",
+                        "tokens": _count_tokens(g_eval.reason or ""),
+                    }
+                ],
             ),
             usage=usage,
             cost=self._as_float(getattr(g_eval, "evaluation_cost", 0.0)),
@@ -332,7 +344,9 @@ class GevalNode(BaseMetricNode):
                 steps_tokens += sum(float(step.tokens) for step in metric.evaluation_steps)
             elif metric.criteria:
                 steps_tokens += float(metric.criteria.tokens)
-                steps_tokens += AVG_DEEPEVAL_GEVAL_CRITERIA_STEPS * AVG_DEEPEVAL_GEVAL_CRITERIA_STEP_TOKENS
+                steps_tokens += (
+                    AVG_DEEPEVAL_GEVAL_CRITERIA_STEPS * AVG_DEEPEVAL_GEVAL_CRITERIA_STEP_TOKENS
+                )
 
         input_tokens = (
             metric_count * AVG_DEEPEVAL_PROMPT_TOKENS
@@ -342,9 +356,8 @@ class GevalNode(BaseMetricNode):
             + (float(reference.tokens) if reference else 0.0)
             + (float(context.tokens) if context else 0.0)
         )
-        output_tokens = (
-            metric_count
-            * (AVG_DEEPEVAL_OUTPUT_REASONING_TOKENS + AVG_DEEPEVAL_OUTPUT_VERDICT)
+        output_tokens = metric_count * (
+            AVG_DEEPEVAL_OUTPUT_REASONING_TOKENS + AVG_DEEPEVAL_OUTPUT_VERDICT
         )
         pricing = get_model_pricing(self.judge_model)
         estimated_cost = cost_usd(input_tokens, pricing, "input") + cost_usd(

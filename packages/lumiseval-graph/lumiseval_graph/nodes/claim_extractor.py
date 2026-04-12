@@ -54,7 +54,10 @@ class ClaimExtractorNode(BaseNode):
             response = llm.invoke(
                 [
                     {"role": "system", "content": self.SYSTEM_PROMPT},
-                    {"role": "user", "content": self.USER_PROMPT.format(chunk_text=chunk.item.text)},
+                    {
+                        "role": "user",
+                        "content": self.USER_PROMPT.format(chunk_text=chunk.item.text),
+                    },
                 ]
             )
             if response["parsing_error"]:
@@ -96,12 +99,8 @@ class ClaimExtractorNode(BaseNode):
 
     def estimate(self, chunks: list[Chunk]) -> CostEstimate:
 
-        tokens = sum(
-            c.item.tokens
-            for c in chunks
-            if c.item and c.item.text.strip()
-        )
-        output_tokens=len(chunks)*AVG_CLAIM_INPUT_TOKENS
+        tokens = sum(c.item.tokens for c in chunks if c.item and c.item.text.strip())
+        output_tokens = len(chunks) * AVG_CLAIM_INPUT_TOKENS
 
         input_tokens = self.static_prompt_tokens + tokens
         pricing = get_model_pricing(self.model)
@@ -109,5 +108,6 @@ class ClaimExtractorNode(BaseNode):
         return CostEstimate(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cost=cost_usd(input_tokens, pricing, "input") + cost_usd(output_tokens, pricing, "output"),
+            cost=cost_usd(input_tokens, pricing, "input")
+            + cost_usd(output_tokens, pricing, "output"),
         )

@@ -26,11 +26,13 @@ from lumiseval_graph.llm import normalize_runtime_overrides
 
 def test_normalize_runtime_overrides_parses_and_normalizes() -> None:
     """normalize_runtime_overrides canonicalises keys and values."""
-    overrides = normalize_runtime_overrides({
-        "models": {"relevance": "openai/gpt-4.1"},
-        "fallback_models": {"relevance": "openai/gpt-4o-mini"},
-        "temperatures": {"relevance": 0.2},
-    })
+    overrides = normalize_runtime_overrides(
+        {
+            "models": {"relevance": "openai/gpt-4.1"},
+            "fallback_models": {"relevance": "openai/gpt-4o-mini"},
+            "temperatures": {"relevance": 0.2},
+        }
+    )
 
     assert overrides["models"]["relevance"] == "openai/gpt-4.1"
     assert overrides["fallback_models"]["relevance"] == "openai/gpt-4o-mini"

@@ -229,7 +229,8 @@ class RedteamNode(BaseMetricNode):
         cost = CostEstimate(
             input_tokens=prompt_tokens,
             output_tokens=completion_tokens,
-            cost=cost_usd(prompt_tokens, pricing, "input") + cost_usd(completion_tokens, pricing, "output"),
+            cost=cost_usd(prompt_tokens, pricing, "input")
+            + cost_usd(completion_tokens, pricing, "output"),
         )
 
         parsed: _RedteamJudgeResponse | None = response["parsed"]
@@ -251,9 +252,7 @@ class RedteamNode(BaseMetricNode):
         verdict = parsed.verdict
         violations = [v.strip() for v in parsed.violations if isinstance(v, str) and v.strip()]
         evidence_spans_raw = getattr(parsed, "evidence_spans", []) or []
-        evidence_spans = [
-            s.strip() for s in evidence_spans_raw if isinstance(s, str) and s.strip()
-        ]
+        evidence_spans = [s.strip() for s in evidence_spans_raw if isinstance(s, str) and s.strip()]
         reasoning = parsed.reasoning.strip()
         passed = verdict == "safe" and score >= METRIC_PASS_THRESHOLD
 

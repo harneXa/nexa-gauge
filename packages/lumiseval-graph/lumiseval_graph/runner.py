@@ -115,7 +115,9 @@ def _compute_case_fingerprint(case: dict[str, Any]) -> str:
     )
 
 
-def _node_route_fingerprint(node_name: str, *, state: Mapping[str, Any], execution_mode: str) -> str:
+def _node_route_fingerprint(
+    node_name: str, *, state: Mapping[str, Any], execution_mode: str
+) -> str:
     llm_overrides = state.get("llm_overrides")
     node_cfg = get_node_config(node_name, llm_overrides=llm_overrides)
     resolved_model = node_cfg.model or cfg.LLM_MODEL
@@ -364,7 +366,10 @@ class CachedNodeRunner:
                         # Use an isolated snapshot per metric task to avoid shared
                         # nested object mutation races in parallel execution.
                         futures = {
-                            pool.submit(NODE_FNS[metric_step], deepcopy(state)): (metric_step, metric_key)
+                            pool.submit(NODE_FNS[metric_step], deepcopy(state)): (
+                                metric_step,
+                                metric_key,
+                            )
                             for metric_step, metric_key, _ in to_run
                         }
                         for future in as_completed(futures):
@@ -385,18 +390,30 @@ class CachedNodeRunner:
                                 )
 
                 for metric_step in METRIC_NODES:
-                    merged_output = cached_group_outputs.get(metric_step) or run_group_outputs.get(metric_step)
+                    merged_output = cached_group_outputs.get(metric_step) or run_group_outputs.get(
+                        metric_step
+                    )
                     if merged_output is not None:
                         _merge_state_patch(state, merged_output)
 
                 group_signature_raw = "|".join(
-                    [group_parent_fingerprint, "metrics", *[metric_fingerprints[n] for n in METRIC_NODES]]
+                    [
+                        group_parent_fingerprint,
+                        "metrics",
+                        *[metric_fingerprints[n] for n in METRIC_NODES],
+                    ]
                 )
                 path_fingerprint = hashlib.sha256(group_signature_raw.encode()).hexdigest()[:16]
                 run_group_signature_raw = "|".join(
-                    [run_group_parent_fingerprint, "metrics", *[run_metric_fingerprints[n] for n in METRIC_NODES]]
+                    [
+                        run_group_parent_fingerprint,
+                        "metrics",
+                        *[run_metric_fingerprints[n] for n in METRIC_NODES],
+                    ]
                 )
-                run_path_fingerprint = hashlib.sha256(run_group_signature_raw.encode()).hexdigest()[:16]
+                run_path_fingerprint = hashlib.sha256(run_group_signature_raw.encode()).hexdigest()[
+                    :16
+                ]
                 i += len(METRIC_NODES)
                 continue
 
@@ -516,7 +533,9 @@ class CachedNodeRunner:
 
         with ThreadPoolExecutor(max_workers=workers) as pool:
             while True:
-                while not stop_submitting and not source_exhausted and len(pending) < in_flight_limit:
+                while (
+                    not stop_submitting and not source_exhausted and len(pending) < in_flight_limit
+                ):
                     try:
                         case = next(case_iter)
                     except StopIteration:
@@ -553,7 +572,9 @@ class CachedNodeRunner:
                 while True:
                     if emit_index in buffered_results:
                         result = buffered_results.pop(emit_index)
-                        yield CaseRunOutcome(index=emit_index, case_id=result.case_id, result=result)
+                        yield CaseRunOutcome(
+                            index=emit_index, case_id=result.case_id, result=result
+                        )
                         emit_index += 1
                         continue
 
@@ -562,7 +583,11 @@ class CachedNodeRunner:
                         yield CaseRunOutcome(index=emit_index, case_id=case_id, error=error)
                         emit_index += 1
 
-                        if not continue_on_error and first_failure_index is not None and emit_index > first_failure_index:
+                        if (
+                            not continue_on_error
+                            and first_failure_index is not None
+                            and emit_index > first_failure_index
+                        ):
                             for pending_future in pending:
                                 pending_future.cancel()
                             return

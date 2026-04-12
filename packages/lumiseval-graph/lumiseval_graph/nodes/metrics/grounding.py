@@ -51,7 +51,10 @@ class GroundingNode(BaseMetricNode):
         ).invoke(
             [
                 {"role": "system", "content": self.SYSTEM_PROMPT},
-                {"role": "user", "content": self.USER_PROMPT.format(context=context, claims=numbered)},
+                {
+                    "role": "user",
+                    "content": self.USER_PROMPT.format(context=context, claims=numbered),
+                },
             ]
         )
 
@@ -61,13 +64,18 @@ class GroundingNode(BaseMetricNode):
         cost = CostEstimate(
             input_tokens=prompt_tokens,
             output_tokens=completion_tokens,
-            cost=cost_usd(prompt_tokens, pricing, "input") + cost_usd(completion_tokens, pricing, "output"),
+            cost=cost_usd(prompt_tokens, pricing, "input")
+            + cost_usd(completion_tokens, pricing, "output"),
         )
 
         result: _GroundingResult = response["parsed"]
         if result is None or not result.verdicts:
             return (
-                MetricResult(name=self.node_name, category=MetricCategory.ANSWER, error="No verdicts returned"),
+                MetricResult(
+                    name=self.node_name,
+                    category=MetricCategory.ANSWER,
+                    error="No verdicts returned",
+                ),
                 cost,
             )
 
@@ -127,5 +135,6 @@ class GroundingNode(BaseMetricNode):
         return CostEstimate(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cost=cost_usd(input_tokens, pricing, "input") + cost_usd(output_tokens, pricing, "output"),
+            cost=cost_usd(input_tokens, pricing, "input")
+            + cost_usd(output_tokens, pricing, "output"),
         )

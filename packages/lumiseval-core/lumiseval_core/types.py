@@ -30,12 +30,12 @@ class MetricCategory(str, Enum):
     RETRIEVAL = "retrieval"  # was evidence retrieval correct/complete?
     ANSWER = "answer"  # is the answer correct, relevant, and safe?
 
+
 # ------------------------------------------------------------
 # New Nodes
 # ------------------------------------------------------------
 GevalItemField = Literal["question", "generation", "reference", "context"]
 RedteamItemField = Literal["question", "generation", "reference", "context"]
-
 
 
 class GevalMetricSpec(BaseModel):
@@ -65,15 +65,19 @@ class Item(BaseModel):
         if not self.id:
             self.id = hashlib.sha256(self.text.encode("utf-8")).hexdigest()[:16]
 
+
 class GevalMetricInput(BaseModel):
     """Input carried by a metric per Item"""
+
     name: str
     item_fields: list[GevalItemField] = Field(default_factory=lambda: ["generation"])
     criteria: Item | None = None
     evaluation_steps: list[Item]
 
+
 class Geval(BaseModel):
     """Input contract carried by Item input payload."""
+
     metrics: list[GevalMetricInput] = Field(default_factory=list)
 
 
@@ -106,6 +110,7 @@ class Chunk(BaseModel):
     char_end: int
     sha256: str
 
+
 class Claim(BaseModel):
     item: Item
     source_chunk_index: Optional[int] = None
@@ -127,6 +132,7 @@ class Faithfulness(Claim):
 
 class Relevancy(Claim):
     verdict: Literal["ACCEPTED", "REJECTED"]
+
 
 class Inputs(BaseModel):
     case_id: str
@@ -160,16 +166,19 @@ class CostEstimate(BaseModel):
     input_tokens: Optional[float] = None
     output_tokens: Optional[float] = None
 
+
 # -----
 # NODES Essentials
 #
 class ChunkArtifacts(BaseModel):
     chunks: list[Chunk]
-    cost:  CostEstimate
+    cost: CostEstimate
+
 
 class ClaimArtifacts(BaseModel):
     claims: list[Claim]
     cost: CostEstimate
+
 
 class DedupArtifacts(BaseModel):
     items: list[Item]
@@ -177,13 +186,16 @@ class DedupArtifacts(BaseModel):
     dedup_map: dict[int, int]
     cost: CostEstimate
 
+
 class GroundingMetrics(BaseModel):
     metrics: list[MetricResult]
     cost: CostEstimate
 
+
 class RelevanceMetrics(BaseModel):
     metrics: list[MetricResult]
     cost: CostEstimate
+
 
 class RedteamMetrics(BaseModel):
     metrics: list[MetricResult]
@@ -192,12 +204,14 @@ class RedteamMetrics(BaseModel):
 
 class GevalStepsResolved(BaseModel):
     """This is per metric per Item."""
+
     key: str
     name: str
     item_fields: list[GevalItemField]
     evaluation_steps: list[Item]
     steps_source: Literal["provided", "generated", "cache_used"]
     signature: str | None = None
+
 
 class GevalStepsArtifacts(BaseModel):
     resolved_steps: list[GevalStepsResolved] = Field(default_factory=list)
@@ -208,9 +222,11 @@ class GevalMetrics(BaseModel):
     metrics: list[MetricResult] = Field(default_factory=list)
     cost: CostEstimate | None = None
 
+
 class ReferenceMetrics(BaseModel):
     metrics: list[MetricResult]
     cost: CostEstimate
+
 
 class EvalPayload(BaseModel):
     metrics: list[MetricResult]

@@ -52,8 +52,8 @@ COST_FALLBACK_PER_CALL_USD: float = 0.0003
 # without actually running any LLM calls.
 
 # Average tokens in a single extracted claim text.
-AVG_CLAIM_INPUT_TOKENS: int = 25 + 12 # 25 claims token, and 12 structured LLM output tokens
-AVG_CLAIMS_PER_CHUNK: int = 2 # Average number of claims extracted per chunk
+AVG_CLAIM_INPUT_TOKENS: int = 25 + 12  # 25 claims token, and 12 structured LLM output tokens
+AVG_CLAIMS_PER_CHUNK: int = 2  # Average number of claims extracted per chunk
 
 # Average output tokens for a single boolean verdict (grounding): "true"/"false".
 AVG_CLAIM_OUTPUT_TOKENS_BOOLEAN_VERDICT: int = 7

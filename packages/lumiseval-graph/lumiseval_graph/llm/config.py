@@ -40,15 +40,22 @@ class RuntimeLLMOverrides(TypedDict, total=False):
     temperatures: dict[str, float]
 
 
-_KNOWN_NODES: frozenset[str] = frozenset({
-    "claims", "chunk", "dedup", "relevance",
-    "grounding", "reference", "redteam", "geval", "geval_steps",
-})
+_KNOWN_NODES: frozenset[str] = frozenset(
+    {
+        "claims",
+        "chunk",
+        "dedup",
+        "relevance",
+        "grounding",
+        "reference",
+        "redteam",
+        "geval",
+        "geval_steps",
+    }
+)
 
 _NODE_ALIASES: dict[str, str] = {
-    f"{prefix}{n}": n
-    for n in _KNOWN_NODES
-    for prefix in ("node_", "generation_")
+    f"{prefix}{n}": n for n in _KNOWN_NODES for prefix in ("node_", "generation_")
 }
 
 

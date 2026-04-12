@@ -22,7 +22,9 @@ class ChunkExtractorNode(BaseNode):
         text = item.text
         num_tokens = item.tokens if item.tokens > 0 else float(_count_tokens(text))
         cost = CostEstimate(
-            input_tokens=0, output_tokens=0, cost=0,
+            input_tokens=0,
+            output_tokens=0,
+            cost=0,
         )
 
         if num_tokens < CHUNK_MIN_TOKENS_FOR_SPLIT:
@@ -55,7 +57,6 @@ class ChunkExtractorNode(BaseNode):
                 )
             )
             cursor = end
-
 
         log.success(f"{len(chunks)} chunk(s) produced")
         return ChunkArtifacts(chunks=chunks, cost=cost)

@@ -79,7 +79,9 @@ def test_resolve_runtime_llm_overrides_ignores_non_branch_node_with_warning() ->
 
 
 def test_resolve_runtime_llm_overrides_rejects_legacy_global_conflict() -> None:
-    with pytest.raises(ValueError, match="Conflicting global model values from --model and --llm-model"):
+    with pytest.raises(
+        ValueError, match="Conflicting global model values from --model and --llm-model"
+    ):
         _resolve_runtime_llm_overrides(
             target_node="grounding",
             legacy_model="openai/gpt-4o",

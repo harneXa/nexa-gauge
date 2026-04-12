@@ -40,7 +40,9 @@ def test_run_returns_metric_and_cost_with_mocked_llm(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(relevance_module, "get_llm", lambda *_args, **_kwargs: FakeLLM())
 
     node = RelevanceNode(judge_model="gpt-4o-mini")
-    result = node.run(claims=_claims(), question=Item(text="What is the capital of France?", tokens=8))
+    result = node.run(
+        claims=_claims(), question=Item(text="What is the capital of France?", tokens=8)
+    )
 
     assert len(result.metrics) == 1
     metric = result.metrics[0]
@@ -55,7 +57,9 @@ def test_run_returns_metric_and_cost_with_mocked_llm(monkeypatch: pytest.MonkeyP
 def test_run_skips_when_disabled_or_no_question() -> None:
     node = RelevanceNode(judge_model="gpt-4o-mini")
 
-    disabled = node.run(claims=_claims(), question="What is the capital of France?", enable_relevance=False)
+    disabled = node.run(
+        claims=_claims(), question="What is the capital of France?", enable_relevance=False
+    )
     assert disabled.metrics == []
     assert disabled.cost.cost == 0.0
 
