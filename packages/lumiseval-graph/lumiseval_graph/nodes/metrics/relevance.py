@@ -60,6 +60,7 @@ class RelevanceNode(BaseMetricNode):
                 },
             ]
         )
+        self._record_model_response(response, primary_model=self.judge_model)
 
         pricing = get_model_pricing(self.judge_model)
         prompt_tokens = float(response["usage"]["prompt_tokens"])
@@ -107,6 +108,7 @@ class RelevanceNode(BaseMetricNode):
         question: Item | str | None,
         enable_relevance: bool = True,
     ) -> RelevanceMetrics:
+        self._reset_model_usage()
         zero_cost = CostEstimate(cost=0.0, input_tokens=None, output_tokens=None)
         if not claims or not enable_relevance:
             return RelevanceMetrics(
@@ -127,6 +129,7 @@ class RelevanceNode(BaseMetricNode):
         return RelevanceMetrics(metrics=[result], cost=cost)
 
     def estimate(self, question: Item | str | None) -> CostEstimate:
+        self._reset_model_usage()
         question_tokens = (
             float(question.tokens)
             if isinstance(question, Item)

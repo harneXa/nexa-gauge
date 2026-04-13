@@ -293,7 +293,7 @@ def test_estimate_mode_only_executes_for_uncached_new_records(monkeypatch, tmp_p
 
     first = outcomes[0].result
     assert first is not None
-    assert first.executed_nodes == []
+    assert first.executed_nodes == ["report"]
     assert "grounding" in first.cached_nodes
     assert first.final_state.get("estimated_costs", {}) == {}
 
@@ -502,3 +502,28 @@ def test_eval_estimate_executes_grounding_when_case_content_changes(
     assert "grounding" in eval_estimate.executed_nodes
     assert "grounding" not in eval_estimate.cached_nodes
     assert eval_estimate.final_state["estimated_costs"]["grounding"].cost == 0.3
+
+
+def test_eval_and_report_are_never_cache_hits(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_cache_dir: Path,
+) -> None:
+    _install_fake_pipeline_nodes(monkeypatch)
+
+    runner = CachedNodeRunner(cache_store=CacheStore(isolated_cache_dir))
+    case = {
+        "case_id": "case-eval-cache-policy",
+        "generation": "hello",
+        "question": "q",
+        "context": ["ctx"],
+    }
+
+    first = runner.run_case(case=case, node_name="eval", execution_mode="run")
+    second = runner.run_case(case=case, node_name="eval", execution_mode="run")
+
+    assert "eval" in first.executed_nodes
+    assert "report" in first.executed_nodes
+    assert "eval" in second.executed_nodes
+    assert "report" in second.executed_nodes
+    assert "eval" not in second.cached_nodes
+    assert "report" not in second.cached_nodes

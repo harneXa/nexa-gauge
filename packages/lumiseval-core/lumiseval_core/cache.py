@@ -138,7 +138,7 @@ def _deserialize(node_output_raw: dict[str, Any]) -> dict[str, Any]:
         if key == "estimated_costs" and isinstance(value, dict):
             result[key] = {k: CostEstimate.model_validate(v) for k, v in value.items()}
             continue
-        if key == "report" and isinstance(value, list):
+        if key == "report" and isinstance(value, (list, dict)):
             result[key] = value
             continue
         type_info = _FIELD_TYPE_MAP.get(key)
@@ -160,10 +160,12 @@ CACHE_KEY_VERSION = "v2"
 # - Reads are always allowed so estimate can reuse run-mode cache.
 # - Writes are restricted to this hardcoded allowlist (empty by default).
 ESTIMATE_CACHE_WRITE_NODES: frozenset[str] = frozenset()
+NON_CACHEABLE_NODES: frozenset[str] = frozenset({"eval", "report"})
 
 
 def cache_read_allowed(*, execution_mode: str, node_name: str) -> bool:
-    del node_name
+    if node_name in NON_CACHEABLE_NODES:
+        return False
     if execution_mode == "run":
         return True
     if execution_mode == "estimate":
@@ -172,6 +174,8 @@ def cache_read_allowed(*, execution_mode: str, node_name: str) -> bool:
 
 
 def cache_write_allowed(*, execution_mode: str, node_name: str) -> bool:
+    if node_name in NON_CACHEABLE_NODES:
+        return False
     if execution_mode == "run":
         return True
     if execution_mode == "estimate":

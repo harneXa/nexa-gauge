@@ -84,7 +84,7 @@ def _stable_json(obj: Any) -> str:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), default=_default)
 
 
-def _build_initial_state(case: dict[str, Any], *, execution_mode: str) -> EvalCase:
+def _build_initial_state(case: dict[str, Any], *, execution_mode: str, target_node: str) -> EvalCase:
     record = {
         "case_id": _case_id(case),
         "generation": _case_value(case, "generation"),
@@ -97,8 +97,10 @@ def _build_initial_state(case: dict[str, Any], *, execution_mode: str) -> EvalCa
     return EvalCase(
         record=record,
         llm_overrides=_case_value(case, "llm_overrides"),
+        target_node=target_node,
         execution_mode=execution_mode,
         estimated_costs={},
+        node_model_usage={},
         reference_files=_case_value(case, "reference_files") or [],
     )
 
@@ -206,6 +208,12 @@ def _merge_state_patch(state: dict[str, Any], patch: Mapping[str, Any]) -> None:
             merged.update(dict(value))
             state["estimated_costs"] = merged
             continue
+        if key == "node_model_usage" and isinstance(value, Mapping):
+            existing = state.get("node_model_usage")
+            merged = dict(existing) if isinstance(existing, Mapping) else {}
+            merged.update(dict(value))
+            state["node_model_usage"] = merged
+            continue
         state[key] = value
 
 
@@ -301,7 +309,11 @@ class CachedNodeRunner:
 
         t0 = time.monotonic()
 
-        state: EvalCase = _build_initial_state(case, execution_mode=execution_mode)
+        state: EvalCase = _build_initial_state(
+            case,
+            execution_mode=execution_mode,
+            target_node=node_name,
+        )
 
         case_fingerprint = _compute_case_fingerprint(case)
 

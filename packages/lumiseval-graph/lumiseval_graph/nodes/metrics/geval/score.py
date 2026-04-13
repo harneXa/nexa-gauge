@@ -237,6 +237,7 @@ class GevalNode(BaseMetricNode):
         context: Optional[Item],
     ) -> GevalMetrics:  # type: ignore[override]
         """Score resolved GEval metrics from case payload only."""
+        self._reset_model_usage()
 
         if not resolved_artifacts:
             return GevalMetrics(metrics=[], cost=None)
@@ -317,6 +318,12 @@ class GevalNode(BaseMetricNode):
         input_tokens = total_input_tokens if total_input_tokens > 0 else None
         output_tokens = total_output_tokens if total_output_tokens > 0 else None
         metrics = [result.metric for result in evaluated]
+        model_calls = len(evaluated)
+        self._set_model_usage_counts(
+            model_counts={self.judge_model: model_calls} if model_calls > 0 else {},
+            total_calls=model_calls,
+            fallback_hits=0,
+        )
         return GevalMetrics(
             metrics=metrics,
             cost=CostEstimate(
@@ -334,6 +341,7 @@ class GevalNode(BaseMetricNode):
         context: Optional[Item],
         geval: Optional[Geval],
     ) -> CostEstimate:
+        self._reset_model_usage()
         if not geval or not geval.metrics:
             return CostEstimate(cost=0.0, input_tokens=None, output_tokens=None)
 

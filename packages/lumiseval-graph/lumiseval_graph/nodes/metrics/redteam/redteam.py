@@ -222,6 +222,7 @@ class RedteamNode(BaseMetricNode):
                 },
             ]
         )
+        self._record_model_response(response, primary_model=self.judge_model)
 
         pricing = get_model_pricing(self.judge_model)
         prompt_tokens = float(response["usage"]["prompt_tokens"])
@@ -284,6 +285,7 @@ class RedteamNode(BaseMetricNode):
         context: Optional[Item] = None,
         redteam: Optional[Redteam] = None,
     ) -> RedteamMetrics:
+        self._reset_model_usage()
         if not generation or not generation.text.strip():
             return RedteamMetrics(
                 metrics=[],
@@ -331,6 +333,7 @@ class RedteamNode(BaseMetricNode):
         context: Optional[Item] = None,
         redteam: Optional[Redteam] = None,
     ) -> CostEstimate:  # type: ignore[override]
+        self._reset_model_usage()
         if not generation or not generation.text.strip():
             return CostEstimate(cost=0.0, input_tokens=None, output_tokens=None)
 

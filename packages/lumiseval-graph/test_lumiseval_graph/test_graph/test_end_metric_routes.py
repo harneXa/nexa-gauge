@@ -8,7 +8,17 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import pytest
-from lumiseval_core.types import MetricCategory, MetricResult
+from lumiseval_core.types import (
+    Chunk,
+    ChunkArtifacts,
+    Claim,
+    ClaimArtifacts,
+    CostEstimate,
+    Inputs,
+    Item,
+    MetricCategory,
+    MetricResult,
+)
 
 
 def _empty_metric_groups() -> dict[str, list[MetricResult]]:
@@ -58,9 +68,11 @@ def test_report_for_metric_targets_contains_only_that_branch(
     report_out = graph_module.node_report(state)
     report = report_out["report"]
 
-    assert isinstance(report, list)
-    assert len(report) == 1
-    assert report[0]["name"] == metric_name
+    assert isinstance(report, dict)
+    assert report["target_node"] == "eval"
+    assert isinstance(report["metrics"], list)
+    assert len(report["metrics"]) == 1
+    assert report["metrics"][0]["name"] == metric_name
 
 
 def test_report_for_eval_contains_all_metric_branches(
@@ -88,9 +100,12 @@ def test_report_for_eval_contains_all_metric_branches(
     report_out = graph_module.node_report(state)
     report = report_out["report"]
 
-    assert isinstance(report, list)
-    assert len(report) == 5
-    assert [m["name"] for m in report] == [
+    assert isinstance(report, dict)
+    assert report["target_node"] == "eval"
+    metrics = report["metrics"]
+    assert isinstance(metrics, list)
+    assert len(metrics) == 5
+    assert [m["name"] for m in metrics] == [
         "grounding",
         "answer_relevancy",
         "vulnerability_prompt_injection",
@@ -101,3 +116,116 @@ def test_report_for_eval_contains_all_metric_branches(
 
 def test_node_eval_is_orchestration_only(graph_module) -> None:
     assert graph_module.node_eval({}) == {}
+
+
+def test_report_for_grounding_target_includes_inputs_and_branch_nodes(graph_module) -> None:
+    """
+    pytest -s packages/lumiseval-graph/test_lumiseval_graph/test_graph/test_end_metric_routes.py::test_report_for_grounding_target_includes_inputs_and_branch_nodes
+    """
+    state = {
+        "target_node": "grounding",
+        "record": {
+            "case_id": "case-1",
+            "generation": "Paris is the capital of France.",
+            "question": "What is the capital of France?",
+            "reference": "Paris",
+            "context": "France has Paris as its capital.",
+        },
+        "inputs": Inputs(
+            case_id="case-1",
+            generation=Item(text="Paris is the capital of France.", tokens=7.0),
+            question=Item(text="What is the capital of France?", tokens=7.0),
+            context=Item(text="France has Paris as its capital.", tokens=7.0),
+            reference=Item(text="Paris", tokens=1.0),
+            has_generation=True,
+            has_question=True,
+            has_context=True,
+            has_reference=True,
+        ),
+        "generation_chunk": ChunkArtifacts(
+            chunks=[
+                Chunk(
+                    index=0,
+                    item=Item(text="Paris is the capital of France.", tokens=7.0),
+                    char_start=0,
+                    char_end=31,
+                    sha256="abc123",
+                )
+            ],
+            cost=CostEstimate(cost=0.0, input_tokens=0.0, output_tokens=0.0),
+        ),
+        "generation_claims": ClaimArtifacts(
+            claims=[
+                Claim(
+                    item=Item(text="Paris is the capital of France.", tokens=7.0),
+                    source_chunk_index=0,
+                    confidence=0.95,
+                )
+            ],
+            cost=CostEstimate(cost=0.001, input_tokens=10.0, output_tokens=3.0),
+        ),
+        "generation_dedup_claims": ClaimArtifacts(
+            claims=[
+                Claim(
+                    item=Item(text="Paris is the capital of France.", tokens=7.0),
+                    source_chunk_index=0,
+                    confidence=0.95,
+                )
+            ],
+            cost=CostEstimate(cost=0.0, input_tokens=None, output_tokens=None),
+        ),
+        "grounding_metrics": graph_module.GroundingMetrics(
+            metrics=[
+                MetricResult(
+                    name="grounding",
+                    category=MetricCategory.ANSWER,
+                    score=1.0,
+                )
+            ],
+            cost=CostEstimate(cost=0.002, input_tokens=20.0, output_tokens=2.0),
+        ),
+        "node_model_usage": {
+            "claims": {
+                "used_models": ["openai/gpt-4o-mini"],
+                "used_model_counts": {"openai/gpt-4o-mini": 1},
+                "total_calls": 1,
+                "fallback_hits": 0,
+            },
+            "grounding": {
+                "used_models": ["openai/gpt-4o"],
+                "used_model_counts": {"openai/gpt-4o": 1},
+                "total_calls": 1,
+                "fallback_hits": 1,
+            },
+        },
+        "estimated_costs": {},
+    }
+
+    report_out = graph_module.node_report(state)
+    report = report_out["report"]
+
+    assert report["target_node"] == "grounding"
+    assert report["inputs"]["case_id"] == "case-1"
+    assert report["inputs"]["question"] == "What is the capital of France?"
+    assert report["inputs"]["generation"] == "Paris is the capital of France."
+    assert report["inputs"]["context"] == "France has Paris as its capital."
+    assert report["inputs"]["reference"] == "Paris"
+    assert report["branch"] == ["scan", "chunk", "claims", "dedup", "grounding"]
+    assert set(report["nodes"].keys()) == {"scan", "chunk", "claims", "dedup", "grounding"}
+    assert report["nodes"]["chunk"]["eligible"] is True
+    assert report["nodes"]["chunk"]["output"] == {
+        "chunk_texts": ["Paris is the capital of France."],
+    }
+    assert report["nodes"]["claims"]["output"] == {
+        "claim_texts": ["Paris is the capital of France."],
+    }
+    assert report["nodes"]["dedup"]["output"] == {
+        "claim_texts": ["Paris is the capital of France."],
+    }
+    assert report["nodes"]["grounding"]["output"] == {
+        "metric_scores": [1.0],
+        "metric_errors": [None],
+    }
+    assert report["nodes"]["claims"]["cost"]["cost"] == pytest.approx(0.001)
+    assert report["nodes"]["grounding"]["model"]["fallback_hits"] == 1
+    assert report["nodes"]["grounding"]["model"]["fallback_used"] is True

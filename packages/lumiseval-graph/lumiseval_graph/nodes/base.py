@@ -46,6 +46,46 @@ NodeEstimate = [
 
 
 class BaseNode(ABC):
+    def _reset_model_usage(self) -> None:
+        self._model_call_counts: dict[str, int] = {}
+        self._model_total_calls: int = 0
+        self._model_fallback_hits: int = 0
+
+    def _record_model_response(self, response: Mapping[str, Any], *, primary_model: str) -> None:
+        if not hasattr(self, "_model_call_counts"):
+            self._reset_model_usage()
+
+        used_model = str(response.get("model") or "").strip()
+        self._model_total_calls += 1
+        if used_model:
+            self._model_call_counts[used_model] = self._model_call_counts.get(used_model, 0) + 1
+            if used_model != primary_model:
+                self._model_fallback_hits += 1
+
+    def _set_model_usage_counts(
+        self,
+        *,
+        model_counts: Mapping[str, int],
+        total_calls: int,
+        fallback_hits: int = 0,
+    ) -> None:
+        self._model_call_counts = {
+            str(model): int(count)
+            for model, count in model_counts.items()
+            if str(model).strip() and int(count) > 0
+        }
+        self._model_total_calls = int(total_calls)
+        self._model_fallback_hits = int(fallback_hits)
+
+    def get_model_usage(self) -> dict[str, Any]:
+        model_counts = dict(sorted(getattr(self, "_model_call_counts", {}).items()))
+        return {
+            "used_models": list(model_counts.keys()),
+            "used_model_counts": model_counts,
+            "total_calls": int(getattr(self, "_model_total_calls", 0)),
+            "fallback_hits": int(getattr(self, "_model_fallback_hits", 0)),
+        }
+
     @abstractmethod
     def run(self, *args: Any, **kwargs) -> NodeEstimate:
         """Execute the metric evaluation and return results.

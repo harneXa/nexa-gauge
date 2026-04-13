@@ -1,7 +1,12 @@
 import hashlib
 import json
 
-from lumiseval_core.cache import CacheStore, compute_case_hash
+from lumiseval_core.cache import (
+    CacheStore,
+    cache_read_allowed,
+    cache_write_allowed,
+    compute_case_hash,
+)
 from lumiseval_core.types import GevalConfig, GevalMetricSpec
 
 
@@ -202,3 +207,10 @@ def test_cache_get_entry_returns_none_when_cache_key_mismatch(tmp_path) -> None:
     )
 
     assert store.get_entry_by_key(expected_key) is None
+
+
+def test_eval_and_report_nodes_are_non_cacheable() -> None:
+    assert cache_read_allowed(execution_mode="run", node_name="eval") is False
+    assert cache_write_allowed(execution_mode="run", node_name="eval") is False
+    assert cache_read_allowed(execution_mode="estimate", node_name="report") is False
+    assert cache_write_allowed(execution_mode="estimate", node_name="report") is False

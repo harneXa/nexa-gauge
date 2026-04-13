@@ -152,6 +152,7 @@ def test_node_relevance_estimate_calls_estimate_with_claims_and_question(
 def test_node_report_sets_cost_estimate_in_estimate_mode(graph_module) -> None:
     state = {
         "execution_mode": "estimate",
+        "target_node": "eval",
         "job_id": "job-estimate",
         "grounding_metrics": [],
         "relevance_metrics": [],
@@ -166,7 +167,10 @@ def test_node_report_sets_cost_estimate_in_estimate_mode(graph_module) -> None:
     }
 
     out = graph_module.node_report(state)
-    assert out["report"] == []
+    report = out["report"]
+    assert isinstance(report, dict)
+    assert report["target_node"] == "eval"
+    assert report["metrics"] == []
     assert out["cost_estimate"].cost == pytest.approx(0.3)
     assert out["cost_estimate"].input_tokens == 10.0
     assert out["cost_estimate"].output_tokens == 5.0

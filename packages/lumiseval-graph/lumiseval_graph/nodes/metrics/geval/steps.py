@@ -93,6 +93,7 @@ class GevalStepsNode(BaseMetricNode):
                 {"role": "user", "content": self.USER_PROMPT.format(criteria=criteria)},
             ]
         )
+        self._record_model_response(response, primary_model=self.judge_model)
 
         pricing = get_model_pricing(self.judge_model)
         prompt_tokens = float(response["usage"]["prompt_tokens"])
@@ -121,6 +122,7 @@ class GevalStepsNode(BaseMetricNode):
         metrics: list[GevalMetricInput],
         enable_geval: bool = True,
     ) -> GevalStepsArtifacts:
+        self._reset_model_usage()
         zero_cost = CostEstimate(cost=0.0, input_tokens=None, output_tokens=None)
         if not enable_geval or not metrics:
             return GevalStepsArtifacts(resolved_steps=[], cost=zero_cost)
@@ -208,6 +210,7 @@ class GevalStepsNode(BaseMetricNode):
         )
 
     def estimate(self, input_tokens: float, output_tokens: float) -> CostEstimate:  # type: ignore[override]
+        self._reset_model_usage()
         pricing = get_model_pricing(self.judge_model)
         billable_input = self.static_prompt_tokens + input_tokens
         return CostEstimate(

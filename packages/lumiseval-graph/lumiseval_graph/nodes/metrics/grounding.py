@@ -57,6 +57,7 @@ class GroundingNode(BaseMetricNode):
                 },
             ]
         )
+        self._record_model_response(response, primary_model=self.judge_model)
 
         pricing = get_model_pricing(self.judge_model)
         prompt_tokens = float(response["usage"]["prompt_tokens"])
@@ -101,6 +102,7 @@ class GroundingNode(BaseMetricNode):
         context: Item | str | list[str] | None,
         enable_grounding: bool = True,
     ) -> GroundingMetrics:
+        self._reset_model_usage()
         zero_cost = CostEstimate(cost=0.0, input_tokens=None, output_tokens=None)
         if not claims or not enable_grounding:
             return GroundingMetrics(metrics=[], cost=zero_cost)
@@ -120,6 +122,7 @@ class GroundingNode(BaseMetricNode):
         return GroundingMetrics(metrics=[result], cost=cost)
 
     def estimate(self, context: Item | str | None) -> CostEstimate:
+        self._reset_model_usage()
         context_tokens = (
             float(context.tokens)
             if isinstance(context, Item)

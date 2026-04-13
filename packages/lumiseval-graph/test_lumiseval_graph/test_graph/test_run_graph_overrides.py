@@ -103,8 +103,9 @@ def test_graph_forwards_llm_overrides_to_nodes(graph_module, monkeypatch) -> Non
             )
 
     class _FakeGevalNode:
-        def __init__(self, judge_model: str):
+        def __init__(self, judge_model: str, llm_overrides=None):
             self.judge_model = judge_model
+            self.llm_overrides = llm_overrides
 
         def run(self, resolved_artifacts, generation, question, reference, context):
             return graph_module.GevalMetrics(

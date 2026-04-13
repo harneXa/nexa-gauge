@@ -44,6 +44,7 @@ class ClaimExtractorNode(BaseNode):
         self.llm_overrides = llm_overrides
 
     def run(self, chunks: list[Chunk]) -> ClaimArtifacts:
+        self._reset_model_usage()
         llm = get_llm("claims", _ClaimList, self.model, llm_overrides=self.llm_overrides)
         pricing = get_model_pricing(self.model)
 
@@ -60,6 +61,7 @@ class ClaimExtractorNode(BaseNode):
                     },
                 ]
             )
+            self._record_model_response(response, primary_model=self.model)
             if response["parsing_error"]:
                 raise response["parsing_error"]
 
@@ -98,6 +100,7 @@ class ClaimExtractorNode(BaseNode):
         return ClaimArtifacts(claims=valid_claims, cost=cumulative_cost)
 
     def estimate(self, chunks: list[Chunk]) -> CostEstimate:
+        self._reset_model_usage()
 
         tokens = sum(c.item.tokens for c in chunks if c.item and c.item.text.strip())
         output_tokens = len(chunks) * AVG_CLAIM_INPUT_TOKENS

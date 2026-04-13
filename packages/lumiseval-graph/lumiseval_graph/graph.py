@@ -15,7 +15,7 @@ TODO:
 
 import logging
 from pathlib import Path
-from typing import Any, Mapping, Optional, TypedDict, cast
+from typing import Any, Mapping, Optional, TypedDict
 
 from lumiseval_core.config import config as cfg
 from lumiseval_core.constants import GENERATION_CHUNK_SIZE_TOKENS
@@ -56,6 +56,7 @@ class EvalCase(TypedDict):
     # Required
     record: dict[str, str]
     llm_overrides: Optional[Mapping[str, Any]]
+    target_node: str
     execution_mode: ExecutionMode
     estimated_costs: dict[str, CostEstimate]
     reference_files: list[Path] = []
@@ -73,6 +74,7 @@ class EvalCase(TypedDict):
     geval_steps: Optional[GevalStepsArtifacts]
     geval_metrics: Optional[GevalMetrics]
     reference_metrics: Optional[ReferenceMetrics]
+    node_model_usage: dict[str, dict[str, Any]]
 
 
 def _is_estimate_mode(state: Mapping[str, Any]) -> bool:
@@ -87,6 +89,16 @@ def _record_estimated_cost(
     costs = dict((state.get("estimated_costs") or {}))
     costs[node_name] = cost
     return costs
+
+
+def _record_node_model_usage(
+    state: Mapping[str, Any],
+    node_name: str,
+    node: Any,
+) -> dict[str, dict[str, Any]]:
+    del state
+    usage = node.get_model_usage() if hasattr(node, "get_model_usage") else {}
+    return {node_name: usage}
 
 
 def _sum_cost_estimates(costs: Mapping[str, CostEstimate] | None) -> CostEstimate:
@@ -192,11 +204,15 @@ def node_generation_claims(state: EvalCase) -> dict[str, Any]:
         return {
             "generation_claims": ClaimArtifacts(claims=[], cost=estimated_cost),
             "estimated_costs": _record_estimated_cost(state, "claims", estimated_cost),
+            "node_model_usage": _record_node_model_usage(state, "claims", node),
         }
 
     claim_artifact = node.run(generation_chunk.chunks)
 
-    return {"generation_claims": claim_artifact}
+    return {
+        "generation_claims": claim_artifact,
+        "node_model_usage": _record_node_model_usage(state, "claims", node),
+    }
 
 
 @observe(name="node_generation_claims_dedup")
@@ -256,6 +272,7 @@ def node_grounding(state: EvalCase) -> dict[str, Any]:
         return {
             "grounding_metrics": GroundingMetrics(metrics=[], cost=estimated_cost),
             "estimated_costs": _record_estimated_cost(state, "grounding", estimated_cost),
+            "node_model_usage": _record_node_model_usage(state, "grounding", node),
         }
     claims: list[Claim] = dedup_claims.claims if dedup_claims else []
 
@@ -264,7 +281,10 @@ def node_grounding(state: EvalCase) -> dict[str, Any]:
         context=context_item or inputs.generation,
         enable_grounding=inputs.has_context,
     )
-    return {"grounding_metrics": results}
+    return {
+        "grounding_metrics": results,
+        "node_model_usage": _record_node_model_usage(state, "grounding", node),
+    }
 
 
 @observe(name="node_relevance")
@@ -289,6 +309,7 @@ def node_relevance(state: EvalCase) -> dict[str, Any]:
         return {
             "relevance_metrics": RelevanceMetrics(metrics=[], cost=estimated_cost),
             "estimated_costs": _record_estimated_cost(state, "relevance", estimated_cost),
+            "node_model_usage": _record_node_model_usage(state, "relevance", node),
         }
 
     claims: list[Claim] = dedup_claims.claims if dedup_claims else []
@@ -297,7 +318,10 @@ def node_relevance(state: EvalCase) -> dict[str, Any]:
         claims=claims,
         question=inputs.question,
     )
-    return {"relevance_metrics": results}
+    return {
+        "relevance_metrics": results,
+        "node_model_usage": _record_node_model_usage(state, "relevance", node),
+    }
 
 
 @observe(name="node_redteam")
@@ -324,6 +348,7 @@ def node_redteam(state: EvalCase) -> dict[str, Any]:
         return {
             "redteam_metrics": RedteamMetrics(metrics=[], cost=estimated_cost),
             "estimated_costs": _record_estimated_cost(state, "redteam", estimated_cost),
+            "node_model_usage": _record_node_model_usage(state, "redteam", node),
         }
 
     results = node.run(
@@ -333,7 +358,10 @@ def node_redteam(state: EvalCase) -> dict[str, Any]:
         context=inputs.context,
         redteam=inputs.redteam,
     )
-    return {"redteam_metrics": results}
+    return {
+        "redteam_metrics": results,
+        "node_model_usage": _record_node_model_usage(state, "redteam", node),
+    }
 
 
 @observe(name="node_geval_steps")
@@ -360,10 +388,14 @@ def node_geval_steps(state: EvalCase) -> dict[str, Any]:
         return {
             "geval_steps": GevalStepsArtifacts(resolved_steps=[], cost=estimated_cost),
             "estimated_costs": _record_estimated_cost(state, "geval_steps", estimated_cost),
+            "node_model_usage": _record_node_model_usage(state, "geval_steps", node),
         }
 
     artifacts: GevalStepsArtifacts = node.run(metrics=metrics)
-    return {"geval_steps": artifacts}
+    return {
+        "geval_steps": artifacts,
+        "node_model_usage": _record_node_model_usage(state, "geval_steps", node),
+    }
 
 
 @observe(name="node_geval")
@@ -378,7 +410,7 @@ def node_geval(state: EvalCase) -> dict[str, Any]:
 
     llm_overrides = state.get("llm_overrides")
     model = get_judge_model("geval", cfg.LLM_MODEL, llm_overrides=llm_overrides)
-    node = GevalNode(judge_model=model)
+    node = GevalNode(judge_model=model, llm_overrides=llm_overrides)
 
     if estimate_mode:
         estimated_cost = node.estimate(
@@ -391,6 +423,7 @@ def node_geval(state: EvalCase) -> dict[str, Any]:
         return {
             "geval_metrics": GevalMetrics(metrics=[], cost=estimated_cost),
             "estimated_costs": _record_estimated_cost(state, "geval", estimated_cost),
+            "node_model_usage": _record_node_model_usage(state, "geval", node),
         }
 
     geval_steps = state.get("geval_steps")
@@ -403,7 +436,10 @@ def node_geval(state: EvalCase) -> dict[str, Any]:
         reference=inputs.reference,
         context=inputs.context,
     )
-    return {"geval_metrics": results}
+    return {
+        "geval_metrics": results,
+        "node_model_usage": _record_node_model_usage(state, "geval", node),
+    }
 
 
 @observe(name="node_reference")
@@ -449,17 +485,8 @@ def _unwrap_metrics(value: Any) -> list[Any]:
 
 @observe(name="node_report")
 def node_report(state: EvalCase) -> dict[str, Any]:
-    metrics = report.aggregate(
-        job_id=str(state.get("job_id") or ""),
-        grounding_metrics=_unwrap_metrics(state.get("grounding_metrics")),
-        relevance_metrics=_unwrap_metrics(state.get("relevance_metrics")),
-        redteam_metrics=_unwrap_metrics(state.get("redteam_metrics")),
-        geval_metrics=_unwrap_metrics(state.get("geval_metrics")),
-        reference_metrics=_unwrap_metrics(state.get("reference_metrics")),
-        cost_estimate=state.get("cost_estimate"),
-        cost_actual_usd=cast(float, state.get("cost_actual_usd") or 0.0),
-    )
-    out: dict[str, Any] = {"report": metrics}
+    report_payload = report.aggregate(state=state)
+    out: dict[str, Any] = {"report": report_payload}
     if _is_estimate_mode(state):
         out["cost_estimate"] = _sum_cost_estimates(state.get("estimated_costs"))
     return out
