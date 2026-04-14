@@ -25,9 +25,9 @@ from lumiseval_core.cache import (
     compute_case_hash,
 )
 from lumiseval_core.config import config as cfg
+from lumiseval_core.types import EvalCase
 from pydantic import BaseModel
 
-from lumiseval_graph.graph import EvalCase
 from lumiseval_graph.llm.config import get_node_config
 from lumiseval_graph.registry import NODE_FNS
 from lumiseval_graph.topology import METRIC_NODES, NODES_BY_NAME

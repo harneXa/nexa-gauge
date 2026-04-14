@@ -1,22 +1,118 @@
-"""Structured per-record report aggregation helpers."""
+"""Declarative per-record report aggregation.
+
+REPORT_VISIBILITY defines the output shape — nested dict keys become output keys,
+string leaves are dot-path expressions resolved from the EvalCase state root.
+SECTION_GATES controls which sections are omitted when their artifact is None.
+"""
 
 from __future__ import annotations
 
 from typing import Any, Mapping
 
-from lumiseval_core.config import config as cfg
-from lumiseval_core.types import CostEstimate, Inputs, MetricResult
-from lumiseval_graph.llm.config import get_node_config
-from lumiseval_graph.topology import NODES_BY_NAME
+# ---------------------------------------------------------------------------
+# Declarative config: defines exactly what appears in the report output.
+#
+# - Keys = output field names (the structure of the report)
+# - String leaf values = dot-path expressions resolved from EvalCase state
+# - [*] in a path = iterate over a list and extract the remaining path per item
+# - List spec [base_path, {field: sub_path}] = iterate base_path items,
+#   project sub_path fields from each → produces a list of dicts
+# ---------------------------------------------------------------------------
 
-LLM_NODES: frozenset[str] = frozenset(
-    {"claims", "grounding", "relevance", "redteam", "geval_steps", "geval"}
-)
+REPORT_VISIBILITY: dict[str, Any] = {
+    "target_node": "target_node",
+    "input": {
+        "case_id": "inputs.case_id",
+        "generation": "inputs.generation.text",
+        "question": "inputs.question.text",
+        "context": "inputs.context.text",
+        "reference": "inputs.reference.text",
+    },
+    "chunks": {
+        "text": "generation_chunk.chunks[*].item.text",
+        "cost": {
+            "cost": "generation_chunk.cost.cost",
+            "input_tokens": "generation_chunk.cost.input_tokens",
+            "output_tokens": "generation_chunk.cost.output_tokens",
+        },
+    },
+    "claims": {
+        "text": "generation_claims.claims[*].item.text",
+        "cost": {
+            "cost": "generation_claims.cost.cost",
+            "input_tokens": "generation_claims.cost.input_tokens",
+            "output_tokens": "generation_claims.cost.output_tokens",
+        },
+    },
+    "claims_unique": {
+        "text": "generation_dedup_claims.claims[*].item.text",
+        "cost": {
+            "cost": "generation_dedup_claims.cost.cost",
+            "input_tokens": "generation_dedup_claims.cost.input_tokens",
+            "output_tokens": "generation_dedup_claims.cost.output_tokens",
+        },
+    },
+    "geval_steps": {
+        "names": "geval_steps.resolved_steps[*].name",
+        "steps_source": "geval_steps.resolved_steps[*].steps_source",
+        "evaluation_steps": "geval_steps.resolved_steps[*].evaluation_steps.text",
+        "cost": {
+            "cost": "geval_steps.cost.cost",
+            "input_tokens": "geval_steps.cost.input_tokens",
+            "output_tokens": "geval_steps.cost.output_tokens",
+        },
+    },
+    "grounding": {
+        "metrics": ["grounding_metrics.metrics[*]", {"name": "name", "score": "score", "result": "result"}],
+        "cost": {
+            "cost": "grounding_metrics.cost.cost",
+            "input_tokens": "grounding_metrics.cost.input_tokens",
+            "output_tokens": "grounding_metrics.cost.output_tokens",
+        },
+    },
+    "relevance": {
+        "metrics": ["relevance_metrics.metrics[*]", {"name": "name", "score": "score", "result": "result"}],
+        "cost": {
+            "cost": "relevance_metrics.cost.cost",
+            "input_tokens": "relevance_metrics.cost.input_tokens",
+            "output_tokens": "relevance_metrics.cost.output_tokens",
+        },
+    },
+    "redteam": {
+        "metrics": ["redteam_metrics.metrics[*]", {"name": "name", "score": "score", "result": "result"}],
+        "cost": {
+            "cost": "redteam_metrics.cost.cost",
+            "input_tokens": "redteam_metrics.cost.input_tokens",
+            "output_tokens": "redteam_metrics.cost.output_tokens",
+        },
+    },
+    "geval": {
+        "metrics": ["geval_metrics.metrics[*]", {"name": "name", "score": "score", "result": "result"}],
+        "cost": {
+            "cost": "geval_metrics.cost.cost",
+            "input_tokens": "geval_metrics.cost.input_tokens",
+            "output_tokens": "geval_metrics.cost.output_tokens",
+        },
+    },
+    "reference": {
+        "metrics": ["reference_metrics.metrics[*]", {"name": "name", "score": "score", "result": "result"}],
+        "cost": {
+            "cost": "reference_metrics.cost.cost",
+            "input_tokens": "reference_metrics.cost.input_tokens",
+            "output_tokens": "reference_metrics.cost.output_tokens",
+        },
+    },
+}
 
-NODE_OUTPUT_SOURCE_KEYS: dict[str, str] = {
-    "chunk": "generation_chunk",
+# ---------------------------------------------------------------------------
+# Section gates: if the mapped state key is None, the section is omitted.
+# Sections not listed here (target_node, input) are always included.
+# ---------------------------------------------------------------------------
+
+SECTION_GATES: dict[str, str] = {
+    "chunks": "generation_chunk",
     "claims": "generation_claims",
-    "dedup": "generation_dedup_claims",
+    "claims_unique": "generation_dedup_claims",
     "geval_steps": "geval_steps",
     "grounding": "grounding_metrics",
     "relevance": "relevance_metrics",
@@ -25,222 +121,22 @@ NODE_OUTPUT_SOURCE_KEYS: dict[str, str] = {
     "reference": "reference_metrics",
 }
 
-NODE_OUTPUT_PROJECTION_MAP: dict[str, dict[str, str]] = {
-    # "scan": {
-    #     "has_generation": "has_generation",
-    #     "has_question": "has_question",
-    #     "has_context": "has_context",
-    #     "has_reference": "has_reference",
-    #     "has_geval": "has_geval",
-    #     "has_redteam": "has_redteam",
-    # },
-    "chunk": {
-        "chunk_texts": "chunks[*].item.text",
-        # "chunk_tokens": "chunks[*].item.tokens",
-    },
-    "claims": {
-        "claim_texts": "claims[*].item.text",
-        # "claim_tokens": "claims[*].item.tokens",
-    },
-    "dedup": {
-        "claim_texts": "claims[*].item.text",
-        # "claim_tokens": "claims[*].item.tokens",
-    },
-    "geval_steps": {
-        "metric_keys": "resolved_steps[*].key",
-        "metric_names": "resolved_steps[*].name",
-        "item_fields": "resolved_steps[*].item_fields",
-        "steps_source": "resolved_steps[*].steps_source",
-        "step_texts": "resolved_steps[*].evaluation_steps[*].text",
-    },
-    "grounding": {
-        # "metric_names": "metrics[*].name",
-        # "metric_categories": "metrics[*].category",
-        "metric_scores": "metrics[*].score",
-        "metric_errors": "metrics[*].error",
-    },
-    "relevance": {
-        # "metric_names": "metrics[*].name",
-        # "metric_categories": "metrics[*].category",
-        "metric_scores": "metrics[*].score",
-        "metric_errors": "metrics[*].error",
-    },
-    "redteam": {
-        # "metric_names": "metrics[*].name",
-        # "metric_categories": "metrics[*].category",
-        "metric_scores": "metrics[*].score",
-        "metric_errors": "metrics[*].error",
-    },
-    "geval": {
-        # "metric_names": "metrics[*].name",
-        # "metric_categories": "metrics[*].category",
-        "metric_scores": "metrics[*].score",
-        "metric_errors": "metrics[*].error",
-    },
-    "reference": {
-        # "metric_names": "metrics[*].name",
-        # "metric_categories": "metrics[*].category",
-        "metric_scores": "metrics[*].score",
-        "metric_errors": "metrics[*].error",
-    },
-    "eval": {"joined": "joined"},
-}
 
-METRIC_GROUP_KEYS: tuple[str, ...] = (
-    "grounding_metrics",
-    "relevance_metrics",
-    "redteam_metrics",
-    "geval_metrics",
-    "reference_metrics",
-)
-
-ZERO_COST = {
-    "cost": 0.0,
-    "input_tokens": None,
-    "output_tokens": None,
-}
-
-
-def _to_jsonable(value: Any) -> Any:
-    if value is None:
-        return None
-    if hasattr(value, "model_dump"):
-        return value.model_dump()
-    if isinstance(value, list):
-        return [_to_jsonable(v) for v in value]
-    if isinstance(value, dict):
-        return {k: _to_jsonable(v) for k, v in value.items()}
-    return value
-
-
-def _to_json_metric(metric: MetricResult) -> dict[str, Any]:
-    if hasattr(metric, "model_dump"):
-        return metric.model_dump()
-    return {
-        "name": getattr(metric, "name", None),
-        "category": getattr(metric, "category", None),
-        "score": getattr(metric, "score", None),
-        "result": getattr(metric, "result", None),
-        "error": getattr(metric, "error", None),
-    }
-
-
-def _as_text(value: Any) -> str | None:
-    if value is None:
-        return None
-    if hasattr(value, "text"):
-        return str(getattr(value, "text"))
-    text = str(value)
-    return text if text else None
-
-
-def _normalize_cost(value: Any) -> dict[str, float | None]:
-    if value is None:
-        return dict(ZERO_COST)
-
-    if isinstance(value, CostEstimate):
-        estimate = value
-    elif isinstance(value, Mapping):
-        estimate = CostEstimate.model_validate(value)
-    else:
-        return dict(ZERO_COST)
-
-    return {
-        "cost": float(estimate.cost or 0.0),
-        "input_tokens": float(estimate.input_tokens)
-        if estimate.input_tokens is not None
-        else None,
-        "output_tokens": float(estimate.output_tokens)
-        if estimate.output_tokens is not None
-        else None,
-    }
-
-
-def _unwrap_metrics(value: Any) -> list[MetricResult]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return value
-    return list(getattr(value, "metrics", None) or [])
-
-
-def _branch_nodes(target_node: str) -> list[str]:
-    spec = NODES_BY_NAME.get(target_node)
-    if spec is None:
-        return []
-    return [*spec.prerequisites, target_node]
-
-
-def _node_eligible(node_name: str, inputs: Inputs | None) -> bool:
-    if node_name in {"scan", "eval", "report"}:
-        return True
-    if inputs is None:
-        return False
-
-    spec = NODES_BY_NAME[node_name]
-    if spec.requires_generation and not bool(inputs.has_generation):
-        return False
-    if spec.requires_context and not bool(inputs.has_context):
-        return False
-    if spec.requires_question and not bool(inputs.has_question):
-        return False
-    if spec.requires_geval and not bool(inputs.has_geval):
-        return False
-    if spec.requires_reference and not bool(inputs.has_reference):
-        return False
-    return True
-
-
-def _project_inputs(state: Mapping[str, Any]) -> dict[str, Any]:
-    inputs = state.get("inputs")
-    record = state.get("record") if isinstance(state.get("record"), Mapping) else {}
-    record_case_id = str((record or {}).get("case_id") or "")
-
-    if inputs is None:
-        return {
-            "case_id": record_case_id or None,
-            "question": _as_text((record or {}).get("question")),
-            "generation": _as_text((record or {}).get("generation")),
-            "context": _as_text((record or {}).get("context")),
-            "reference": _as_text((record or {}).get("reference")),
-        }
-
-    return {
-        "case_id": str(getattr(inputs, "case_id", "") or record_case_id or ""),
-        "question": _as_text(getattr(inputs, "question", None)),
-        "generation": _as_text(getattr(inputs, "generation", None)),
-        "context": _as_text(getattr(inputs, "context", None)),
-        "reference": _as_text(getattr(inputs, "reference", None)),
-    }
-
-
-def _project_scan_output(state: Mapping[str, Any]) -> dict[str, Any]:
-    inputs = state.get("inputs")
-    if inputs is None:
-        return {}
-    return {
-        "has_generation": bool(getattr(inputs, "has_generation", False)),
-        "has_question": bool(getattr(inputs, "has_question", False)),
-        "has_context": bool(getattr(inputs, "has_context", False)),
-        "has_reference": bool(getattr(inputs, "has_reference", False)),
-        "has_geval": bool(getattr(inputs, "has_geval", False)),
-        "has_redteam": bool(getattr(inputs, "has_redteam", False)),
-    }
-
-
-def _raw_node_output(node_name: str, state: Mapping[str, Any]) -> Any:
-    if node_name == "scan":
-        return _project_scan_output(state)
-    if node_name == "eval":
-        return {"joined": True}
-
-    state_key = NODE_OUTPUT_SOURCE_KEYS.get(node_name)
-    if state_key is None:
-        return None
-    return _to_jsonable(state.get(state_key))
+# ---------------------------------------------------------------------------
+# Path resolution helpers
+# ---------------------------------------------------------------------------
 
 
 def _extract_path(value: Any, path: str) -> Any:
+    """Walk a dot-separated path through nested dicts, with [*] list wildcards.
+
+    Examples:
+        _extract_path({"a": {"b": 1}}, "a.b")           -> 1
+        _extract_path({"items": [{"x": 1}, {"x": 2}]},
+                       "items[*].x")                     -> [1, 2]
+        _extract_path({"a": None}, "a.b")                -> None
+        _extract_path({"a": None}, "a[*].b")             -> []
+    """
     segments = [seg for seg in path.split(".") if seg]
     if not segments:
         return value
@@ -268,100 +164,56 @@ def _extract_path(value: Any, path: str) -> Any:
     return _walk(value, 0)
 
 
-def _project_node_output(node_name: str, output: Any) -> Any:
-    projection_fields = NODE_OUTPUT_PROJECTION_MAP.get(node_name)
-    if projection_fields is None:
+def resolve_path(state: Mapping[str, Any], path: str) -> Any:
+    """Extract a value from state using a dot-path with [*] wildcards.
+
+    First segment is the state key (dict lookup). The value is converted to a
+    plain dict via model_dump() if it's a Pydantic model. Remaining segments
+    are resolved via _extract_path.
+    """
+    dot = path.find(".")
+    if dot == -1:
+        return state.get(path)
+    top_key, rest = path[:dot], path[dot + 1:]
+    value = state.get(top_key)
+    if value is None:
         return None
-    if output is None:
-        return None
-    return {name: _extract_path(output, path) for name, path in projection_fields.items()}
+    if hasattr(value, "model_dump"):
+        value = value.model_dump()
+    return _extract_path(value, rest)
 
 
-def _node_output(node_name: str, state: Mapping[str, Any]) -> Any:
-    raw_output = _raw_node_output(node_name, state)
-    return _project_node_output(node_name, raw_output)
+def resolve_section(state: Mapping[str, Any], spec: str | dict | list) -> Any:
+    """Resolve a REPORT_VISIBILITY section against state.
 
-
-def _node_cost(node_name: str, state: Mapping[str, Any]) -> dict[str, float | None]:
-    state_key = NODE_OUTPUT_SOURCE_KEYS.get(node_name)
-    artifact = state.get(state_key) if state_key else None
-    artifact_cost = getattr(artifact, "cost", None)
-    if artifact_cost is not None:
-        return _normalize_cost(artifact_cost)
-
-    estimated = state.get("estimated_costs")
-    if isinstance(estimated, Mapping) and node_name in estimated:
-        return _normalize_cost(estimated[node_name])
-
-    return dict(ZERO_COST)
-
-
-def _node_model(node_name: str, state: Mapping[str, Any]) -> dict[str, Any]:
-    uses_llm = node_name in LLM_NODES
-    if not uses_llm:
-        return {
-            "uses_llm": False,
-            "configured_primary": None,
-            "configured_fallback": None,
-            "used_models": [],
-            "used_model_counts": {},
-            "total_calls": 0,
-            "fallback_hits": 0,
-            "fallback_used": False,
-        }
-
-    node_cfg = get_node_config(node_name, llm_overrides=state.get("llm_overrides"))
-    configured_primary = node_cfg.model or cfg.LLM_MODEL
-    runtime = {}
-    runtime_all = state.get("node_model_usage")
-    if isinstance(runtime_all, Mapping):
-        runtime = runtime_all.get(node_name) or {}
-
-    used_models = list(runtime.get("used_models") or [])
-    model_counts = runtime.get("used_model_counts") or {}
-    total_calls = int(runtime.get("total_calls", 0) or 0)
-    fallback_hits = int(runtime.get("fallback_hits", 0) or 0)
-
-    return {
-        "uses_llm": True,
-        "configured_primary": configured_primary,
-        "configured_fallback": node_cfg.fallback_model,
-        "used_models": used_models,
-        "used_model_counts": model_counts,
-        "total_calls": total_calls,
-        "fallback_hits": fallback_hits,
-        "fallback_used": fallback_hits > 0,
-    }
-
-
-def _collect_metrics(state: Mapping[str, Any]) -> list[dict[str, Any]]:
-    merged: list[MetricResult] = []
-    for key in METRIC_GROUP_KEYS:
-        merged.extend(_unwrap_metrics(state.get(key)))
-    return [_to_json_metric(metric) for metric in merged]
+    String specs are resolved as dot-paths. Dict specs are recursed —
+    each key becomes an output key, each value is resolved recursively.
+    List specs [base_path, projection] iterate items from base_path and
+    project sub-fields from each, producing a list of dicts.
+    """
+    if isinstance(spec, str):
+        return resolve_path(state, spec)
+    if isinstance(spec, list):
+        base_path, projection = spec
+        items = resolve_path(state, base_path)
+        if not isinstance(items, list):
+            return []
+        return [
+            {key: _extract_path(item, path) for key, path in projection.items()}
+            for item in items
+        ]
+    return {key: resolve_section(state, child) for key, child in spec.items()}
 
 
 def aggregate(*, state: Mapping[str, Any]) -> dict[str, Any]:
-    target_node = str(state.get("target_node") or "eval")
-    branch_nodes = _branch_nodes(target_node)
-    inputs = state.get("inputs")
+    """Build report by resolving REPORT_VISIBILITY against state.
 
-    nodes_payload: dict[str, Any] = {}
-    for node_name in branch_nodes:
-        nodes_payload[node_name] = {
-            "eligible": _node_eligible(node_name, inputs),
-            "output": _node_output(node_name, state),
-            "cost": _node_cost(node_name, state),
-            "model": _node_model(node_name, state),
-        }
-
-    cost_estimate = state.get("cost_estimate")
-    return {
-        "target_node": target_node,
-        "inputs": _project_inputs(state),
-        "branch": branch_nodes,
-        "nodes": nodes_payload,
-        "metrics": _collect_metrics(state),
-        "cost_actual_usd": float(state.get("cost_actual_usd") or 0.0),
-        "cost_estimate": _normalize_cost(cost_estimate) if cost_estimate is not None else None,
-    }
+    Sections gated on a None state key (per SECTION_GATES) are omitted.
+    """
+    result: dict[str, Any] = {}
+    for section, spec in REPORT_VISIBILITY.items():
+        gate_key = SECTION_GATES.get(section)
+        if gate_key is not None and state.get(gate_key) is None:
+            continue
+        result[section] = resolve_section(state, spec)
+    return result

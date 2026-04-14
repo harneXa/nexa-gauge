@@ -1,222 +1,150 @@
 # CLI Code Flow
 
-This document traces the full execution path for the two CLI commands: `lumiseval estimate` and `lumiseval run`.
+This document describes the actual command flow for:
+- `lumiseval run <node_name>`
+- `lumiseval estimate <node_name>`
 
-For the cross-cutting question of what runs sequentially vs in parallel across CLI and API paths, see `execution-model.md`.
+Source files:
+- `apps/lumiseval-cli/lumiseval_cli/main.py`
+- `apps/lumiseval-cli/lumiseval_cli/cli/run.py`
+- `apps/lumiseval-cli/lumiseval_cli/cli/estimate.py`
+- `apps/lumiseval-cli/lumiseval_cli/cli/util.py`
 
----
+## 1) Command Entry
 
-## Entry Point
+`main.py` registers two Typer commands:
+- `run`
+- `estimate`
 
-```
-apps/lumiseval-cli/lumiseval_cli/main.py
-```
-
-Both commands are registered with a [Typer](https://typer.tiangolo.com/) app. Running `lumiseval estimate <node>` or `lumiseval run <node>` dispatches to the corresponding decorated function.
-
----
-
-## `lumiseval estimate <node> --input <source>`
-
-Scans the dataset, builds a cache-aware execution plan, and computes the **uncached cost** for the target branch — without running any LLM calls.
-
-```
-estimate()                               main.py
-  │
-  ├── _resolve_target_node(node_name)    validates against NODES_BY_NAME
-  │
-  ├── _load_cases(...)                   loads EvalCase list from dataset
-  │     └── create_dataset_adapter()    lumiseval_ingest — picks local or HF adapter
-  │           └── adapter.iter_cases()  yields EvalCase objects
-  │
-  ├── _build_job_config(...)             builds EvalJobConfig (model, flags, thresholds)
-  │
-  ├── CachedNodeRunner(cache_store)      node_runner.py — wraps CacheStore
-  │
-  └── estimate_preflight(...)            preflight.py
-        │
-        ├── scan_cases(cases)            scanner.py
-        │     └── Scanner.build()
-        │           ├── per-case: token counts (tiktoken cl100k_base)
-        │           ├── per-case: chunk count, claim estimate
-        │           ├── per-case: _node_eligibility() using NodeSpec flags
-        │           └── returns InputMetadata (aggregated counts + per-record metas)
-        │
-        ├── runner.plan_dataset(...)     node_runner.py
-        │     └── for each case: plan_case()
-        │           ├── build_initial_state()
-        │           ├── _compute_hashes() → case_hash + config_hash
-        │           ├── _plan_nodes() → prerequisites + target node
-        │           └── per step: is_case_eligible? → cached? → to_run?
-        │           returns DatasetNodePlan (per-node: to_run / cached / skipped counts)
-        │
-        └── _estimate_delta_cost_report(...)  preflight.py
-              └── for each node in NODE_ORDER:
-                    ├── isolate cases that are "to_run" (not cached, not skipped)
-                    ├── scan_cases(subset) → subset InputMetadata
-                    ├── estimator._estimate_node(node, subset_meta) → NodeCostBreakdown
-                    └── estimator.estimate(..., overrides) → CostReport
-
-  Then CLI prints three tables + final cost line:
-    _print_scan_table(metadata)
-    _print_node_eligibility_table(metadata)
-    _print_execution_plan_table(plan, total_records)
-    _print_cost_table(cost_report, ...)
+```text
+lumiseval
+  ├── run <node_name> ...
+  └── estimate <node_name> ...
 ```
 
-### Key data structures produced
+Both commands share helper utilities for:
+- target node validation
+- branch planning
+- model override parsing
+- routing summary rendering
 
-| Object | Type | Where |
-|---|---|---|
-| `cases` | `list[EvalCase]` | lumiseval-ingest adapter |
-| `job_config` | `EvalJobConfig` | main.py |
-| `preflight.metadata` | `InputMetadata` | scanner.py |
-| `preflight.plan` | `DatasetNodePlan` | node_runner.py |
-| `preflight.cost_report` | `CostReport` | cost_estimator.py |
+## 2) Shared Pre-Execution Steps
 
----
+Both commands execute this setup sequence:
 
-## `lumiseval run <node> --input <source>`
+1. Validate target node (`_resolve_target_node`) against `NODES_BY_NAME`.
+2. Parse and normalize model/fallback overrides (`_resolve_runtime_llm_overrides`).
+3. Print branch LLM routing table (`_print_llm_routing_summary`).
+4. Build cache store:
+   - `CacheStore` (default)
+   - `NoOpCacheStore` when `--no-cache`
+5. Build `CachedNodeRunner`.
+6. Resolve adapter and iterate selected rows:
+   - `create_dataset_adapter(source, adapter, config_name, revision)`
+   - `iter_cases(split=..., limit=...)`
+   - apply `start/end/limit` slicing
+   - inject per-case `llm_overrides`
 
-Executes all nodes up to and including the target node for each case. Uses cache to skip already-computed steps.
+## 3) `lumiseval run` Flow
 
-```
-run()                                    main.py
-  │
-  ├── _resolve_target_node(node_name)    validates against NODES_BY_NAME
-  ├── _load_cases(...)                   same as estimate
-  ├── _build_job_config(...)             same as estimate
-  ├── CachedNodeRunner(cache_store)      same as estimate
-  │
-  └── for case in cases:
-        runner.run_case(case, node_name, job_config, force)   node_runner.py
-          │
-          ├── build_initial_state()      graph.py — builds the mutable state dict
-          ├── _compute_hashes()          case_hash + config_hash (cache key)
-          ├── _plan_nodes()              prerequisites list + target node
-          │
-          └── step loop over planned nodes:
-                │
-                ├── [eval target + metric nodes] → parallel fan-out
-                │     ├── ThreadPoolExecutor over METRIC_NODES
-                │     ├── each metric: eligibility check → cache check → NODE_FNS[m](state)
-                │     └── results merged back into state in stable NODE_ORDER
-                │
-                └── [all other nodes] → sequential
-                      ├── is_case_eligible_for_node? → skipped_output (cached as $0)
-                      ├── cache hit?  → load cached output → state.update()
-                      └── cache miss → NODE_FNS[step](state) → cache.put() → state.update()
+File: `cli/run.py`
 
-  Returns CachedNodeRunResult:
-    executed_nodes, cached_nodes, node_output, final_state, elapsed_ms
-
-  Optionally writes final_state["report"] as JSON to --output-dir
+```text
+run()
+  ├─ resolve target + model routing
+  ├─ adapter.iter_cases(...)
+  └─ runner.run_cases_iter(... execution_mode="run")
+       ├─ per case success:
+       │    - accumulate executed/cached counters
+       │    - if --output-dir and final_state has "report": write JSON
+       └─ per case failure:
+            - capture case_id + error
 ```
 
-### Node execution: `NODE_FNS[step](state)`
+### run output behavior
+- Always prints final summary counts:
+  - total cases
+  - succeeded / failed
+  - executed steps / cached steps
+- If `--output-dir` is provided, one JSON file is written per case **only when** `final_state["report"]` exists.
 
-Every node function lives in `lumiseval_graph/nodes/` and is registered in `registry.py`:
+Practical implication:
+- Targets like `grounding`, `relevance`, `redteam`, `geval`, `reference`, and `eval` usually produce `report`.
+- Intermediate targets like `scan`, `chunk`, `claims`, `dedup` typically do not.
 
-| Node | Function | Purpose |
-|---|---|---|
-| `scan` | `node_metadata_scanner` | Tokenize, chunk-count, build `InputMetadata` |
-| `chunk` | `node_chunk` | Split generation into `Chunk` objects |
-| `claims` | `node_claims` | LLM: extract factual claims from chunks |
-| `dedup` | `node_dedup` | MMR-based deduplication of extracted claims |
-| `geval_steps` | `node_geval_steps` | LLM: generate reusable evaluation steps for criteria-only GEval metrics |
-| `relevance` | `node_relevance` | LLM metric: answer relevancy vs. question |
-| `grounding` | `node_grounding` | LLM metric: faithfulness vs. context passages |
-| `redteam` | `node_adversarial` | LLM metric: safety / red-team evaluation |
-| `geval` | `node_geval` | LLM metric: custom GEval scoring |
-| `reference` | `node_reference` | ROUGE/BLEU/METEOR vs. reference answer |
-| `eval` | `node_eval` | Aggregate all metric results into `EvalReport` |
+## 4) `lumiseval estimate` Flow
 
----
+File: `cli/estimate.py`
 
-## Supporting systems
-
-### Pipeline topology (`lumiseval_core/pipeline.py`)
-
-Single source of truth. Each `NodeSpec` declares:
-
-- `prerequisites` — which nodes must have run first
-- `requires_generation / requires_question / requires_context / requires_geval / requires_reference` — eligibility gates
-- `is_metric` — whether the node participates in the parallel fan-out
-- `skip_output` — state patch applied when a node is skipped
-- `env_key_suffixes` — env var prefixes for LLM model selection
-
-Three derived constants are computed at import time:
-
-```python
-NODES_BY_NAME  # dict[str, NodeSpec] — O(1) lookup
-NODE_ORDER     # list[str]           — stable iteration order
-METRIC_NODES   # list[str]           — parallel fan-out group
+```text
+estimate()
+  ├─ resolve target + model routing
+  ├─ adapter.iter_cases(...)
+  └─ runner.run_cases_iter(... execution_mode="estimate")
+       ├─ aggregate per-node estimated_costs
+       ├─ aggregate per-node stats (executed/cached/estimated/eligible)
+       └─ render estimate summary table + total estimate
 ```
 
-### Cache (`lumiseval_core/cache.py`)
+### estimate output columns
+Rendered table includes per branch node:
+- node_name
+- model
+- status
+- cached / uncached counts
+- uncached eligible count and percent
+- cost_estimate
 
-`CacheStore` is a filesystem-backed key-value store:
+Status is derived from node cost and execution stats:
+- `billable`
+- `zero_cost`
+- `cached_only`
+- `skipped/ineligible`
+- `not_reached`
+- `failed`
 
-- **Key**: `(case_hash, config_hash, node_name)`
-- **case_hash**: SHA-256 of `generation + question + reference + context + geval`
-- **config_hash**: SHA-256 of `EvalJobConfig` fields
+## 5) Adapter Resolution Details
 
-Each cache entry stores `node_output` + `node_cost` (a `NodeCostBreakdown`).
+File: `adapters/registry.py`
 
-`NoOpCacheStore` is used when `--no-cache` is passed; all reads miss and writes are discarded.
+`create_dataset_adapter(...)` rules:
+- `adapter=local` -> local file adapter
+- `adapter=huggingface` -> hf adapter
+- `adapter=auto`:
+  - `hf://...` source -> hf adapter
+  - existing path -> local adapter
+  - else -> input parse error
 
-### Dataset adapters (`lumiseval_ingest/`)
+Local adapter supports:
+- `.json` (object or array of objects)
+- `.jsonl`
+- `.csv`
+- fallback to plain text single-case (`{"generation": <file text>}`)
 
-`create_dataset_adapter(source, adapter, ...)` auto-detects:
+HF adapter requires `datasets` package.
 
-- **local** — JSON/JSONL/CSV files; field mapping via schema inference
-- **huggingface** — `hf://<dataset-id>` URIs; uses `datasets` library
+## 6) CLI Flags That Matter Most
 
-Both yield `EvalCase` objects with a normalized schema.
+Common flags:
+- target/data: `node_name`, `--input`, `--adapter`, `--split`, `--start`, `--end`, `--limit`
+- model routing: `--model`, `--llm-model`, `--llm-fallback`
+- cache/execution: `--force`, `--no-cache`, `--cache-dir`, `--max-workers`, `--max-in-flight`, `--continue-on-error`
 
-### Scanner (`lumiseval_ingest/scanner.py`)
+Run-only:
+- `--output-dir`
+- `--yes` (deprecated no-op)
+- `--web-search`, `--evidence-threshold` are currently accepted but not used in `run` implementation.
 
-`scan_cases(cases)` builds `InputMetadata` without calling any LLM:
+## 7) Where CLI Meets Graph Execution
 
-1. Tokenizes each field with `tiktoken` (`cl100k_base` encoding)
-2. Chunks the generation text to estimate claim count
-3. Calls `_node_eligibility()` — checks each `NodeSpec`'s eligibility flags against the case fields
-4. Aggregates per-record `RecordMeta` into dataset-level token counts and `CostMetadata`
+`CachedNodeRunner` is the bridge from CLI to graph nodes.
 
-### Cost estimator (`lumiseval_graph/nodes/cost_estimator.py`)
+It is responsible for:
+- initial `EvalCase` state construction
+- prerequisite planning
+- cache reads/writes
+- estimate-mode run-cache fallback
+- parallel metric execution for eval target
+- ordered streaming outcomes
 
-`CostEstimator.estimate(metadata, job_config)` produces a `CostReport` with one `CostRow` per node:
-
-- Formula-based: `input_tokens × calls × price_per_token`
-- Cumulative: each row shows total cost up to that node
-- `CostReport.row(node_name)` gives the delta cost for a specific branch
-
----
-
-## Data flow summary
-
-```
-EvalCase list
-     │
-     ▼
-  scan_cases()  ──────────────────► InputMetadata
-     │                                    │
-     ▼                                    ▼
-plan_dataset()  ──────────────────► DatasetNodePlan
-                                          │
-                                          ▼
-                              _estimate_delta_cost_report()
-                                          │
-                                          ▼
-                                      CostReport          ← estimate command stops here
-
-
-  run_case()  (per case)
-     │
-     ├── sequential nodes: scan → chunk → claims → dedup
-     │
-     ├── parallel metric nodes for `eval` target only:
-     │     relevance ║ grounding ║ redteam ║ geval ║ reference
-     │
-     └── eval: aggregate → EvalReport
-```
+For deeper runner semantics, see `docs/execution-model.md`.

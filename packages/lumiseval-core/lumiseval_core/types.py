@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import hashlib
 from enum import Enum
-from typing import Any, Literal, Optional
+from pathlib import Path
+from typing import Any, Literal, Mapping, Optional, TypedDict
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -239,3 +240,32 @@ class EvalReport(BaseModel):
     metrics: list[MetricResult | dict[str, Any]] = Field(default_factory=list)
     cost_estimate: CostEstimate | None = None
     cost_actual_usd: float = 0.0
+
+
+
+# ── Graph state ────────────────────────────────────────────────────────────
+class EvalCase(TypedDict):
+    """Canonical dataset row used by adapters and dataset runners."""
+
+    # Required
+    record: dict[str, str]
+    llm_overrides: Optional[Mapping[str, Any]]
+    target_node: str
+    execution_mode: ExecutionMode
+    estimated_costs: dict[str, CostEstimate]
+    reference_files: list[Path] = []
+
+    # Pipeline inputs
+    inputs: Optional[Inputs]
+
+    # Pipeline artifacts — None until the corresponding node runs
+    generation_chunk: Optional[ChunkArtifacts]
+    generation_claims: Optional[ClaimArtifacts]
+    generation_dedup_claims: Optional[ClaimArtifacts]
+    grounding_metrics: Optional[GroundingMetrics]
+    relevance_metrics: Optional[RelevanceMetrics]
+    redteam_metrics: Optional[RedteamMetrics]
+    geval_steps: Optional[GevalStepsArtifacts]
+    geval_metrics: Optional[GevalMetrics]
+    reference_metrics: Optional[ReferenceMetrics]
+    node_model_usage: dict[str, dict[str, Any]]

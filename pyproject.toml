@@ -1,16 +1,105 @@
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
 [project]
 name = "lumis-eval"
 version = "0.1.0"
-description = "Agentic LLM evaluation pipeline orchestrating RAGAS, DeepEval, and Giskard"
+description = "Agentic LLM evaluation pipeline with cache-aware graph execution"
+readme = "README.md"
 requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+    { name = "LumisEval Contributors" },
+]
+keywords = [
+    "llm",
+    "evaluation",
+    "langgraph",
+    "deepeval",
+    "rag",
+    "benchmarking",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
-    "lumiseval-core",
-    "lumiseval-graph",
-    "lumiseval-cli",
+    "python-dotenv>=1.0.0",
+    "typer>=0.12.0",
+    "rich>=13.0.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "numpy>=1.24.0",
+    "sentence-transformers>=3.0.0",
+    "langgraph>=0.2.0",
+    "litellm==1.82.6",
+    "tokencost>=0.1.26",
+    "ragas>=0.4.0",
+    "deepeval>=1.0.0",
+    "taskiq>=0.11.0",
+    "rouge-score>=0.1.2",
+    "nltk>=3.8.0",
+    "semchunk>=2.2.0",
+]
+
+[project.optional-dependencies]
+huggingface = [
+    "datasets>=2.0.0",
+]
+observability = [
+    "langfuse>=3.12.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+    "pre-commit>=3.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Sardhendu/lumis-eval"
+Repository = "https://github.com/Sardhendu/lumis-eval"
+Issues = "https://github.com/Sardhendu/lumis-eval/issues"
+Documentation = "https://github.com/Sardhendu/lumis-eval/tree/main/docs"
+Security = "https://github.com/Sardhendu/lumis-eval/security/policy"
+
+[project.scripts]
+lumiseval = "lumiseval_cli.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "apps/lumiseval-cli/lumiseval_cli",
+    "packages/lumiseval-core/lumiseval_core",
+    "packages/lumiseval-graph/lumiseval_graph",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "README.md",
+    "LICENSE",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
+    "apps/",
+    "packages/",
+    "docs/",
+    "sample.json",
+    "Makefile",
+    "setup.sh",
+    "pyproject.toml",
 ]
 
 [tool.uv]
-package = false
+package = true
 
 [dependency-groups]
 dev = [
@@ -20,11 +109,6 @@ dev = [
     "mypy>=1.0.0",
     "pre-commit>=3.0.0",
 ]
-
-[tool.uv.sources]
-lumiseval-core  = { workspace = true }
-lumiseval-graph = { workspace = true }
-lumiseval-cli      = { workspace = true }
 
 [tool.uv.workspace]
 members = ["packages/*", "apps/*"]

@@ -7,6 +7,10 @@ from lumiseval_core.types import ChunkArtifacts, CostEstimate, Inputs, Item
 def test_node_generation_claims_estimate_calls_estimate_without_chunks(
     graph_module, monkeypatch
 ) -> None:
+    """Verify claims node estimate mode calls estimate() with zero chunks.
+
+    Run: uv run pytest -s packages/lumiseval-graph/test_lumiseval_graph/test_graph/test_estimate_mode.py::test_node_generation_claims_estimate_calls_estimate_without_chunks
+    """
     captured: dict[str, object] = {}
 
     def _fake_get_judge_model(node_name: str, default: str, llm_overrides=None) -> str:
@@ -57,6 +61,10 @@ def test_node_generation_claims_estimate_calls_estimate_without_chunks(
 def test_node_grounding_estimate_calls_estimate_without_claim_artifact(
     graph_module, monkeypatch
 ) -> None:
+    """Verify grounding node is skipped in estimate mode when required context is missing.
+
+    Run: uv run pytest -s packages/lumiseval-graph/test_lumiseval_graph/test_graph/test_estimate_mode.py::test_node_grounding_estimate_calls_estimate_without_claim_artifact
+    """
     captured: dict[str, object] = {}
 
     def _fake_get_judge_model(node_name: str, default: str, llm_overrides=None) -> str:
@@ -103,6 +111,10 @@ def test_node_grounding_estimate_calls_estimate_without_claim_artifact(
 def test_node_relevance_estimate_calls_estimate_with_claims_and_question(
     graph_module, monkeypatch
 ) -> None:
+    """Verify relevance node estimate mode resolves model and records estimated cost.
+
+    Run: uv run pytest -s packages/lumiseval-graph/test_lumiseval_graph/test_graph/test_estimate_mode.py::test_node_relevance_estimate_calls_estimate_with_claims_and_question
+    """
     captured: dict[str, object] = {}
 
     def _fake_get_judge_model(node_name: str, default: str, llm_overrides=None) -> str:
@@ -150,15 +162,19 @@ def test_node_relevance_estimate_calls_estimate_with_claims_and_question(
 
 
 def test_node_report_sets_cost_estimate_in_estimate_mode(graph_module) -> None:
+    """Verify node_report computes aggregate cost_estimate in estimate mode.
+
+    Run: uv run pytest -s packages/lumiseval-graph/test_lumiseval_graph/test_graph/test_estimate_mode.py::test_node_report_sets_cost_estimate_in_estimate_mode
+    """
     state = {
         "execution_mode": "estimate",
         "target_node": "eval",
         "job_id": "job-estimate",
-        "grounding_metrics": [],
-        "relevance_metrics": [],
-        "redteam_metrics": [],
-        "geval_metrics": [],
-        "reference_metrics": [],
+        "grounding_metrics": None,
+        "relevance_metrics": None,
+        "redteam_metrics": None,
+        "geval_metrics": None,
+        "reference_metrics": None,
         "cost_actual_usd": 0.0,
         "estimated_costs": {
             "claims": CostEstimate(cost=0.1, input_tokens=10.0, output_tokens=2.0),
@@ -170,7 +186,9 @@ def test_node_report_sets_cost_estimate_in_estimate_mode(graph_module) -> None:
     report = out["report"]
     assert isinstance(report, dict)
     assert report["target_node"] == "eval"
-    assert report["metrics"] == []
+    # Metric sections are absent when their state key is None
+    assert "grounding" not in report
+    assert "relevance" not in report
     assert out["cost_estimate"].cost == pytest.approx(0.3)
     assert out["cost_estimate"].input_tokens == 10.0
     assert out["cost_estimate"].output_tokens == 5.0

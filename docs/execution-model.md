@@ -1,56 +1,108 @@
 # Execution Model
 
-This document describes the current GEval-only execution model after the legacy hard cut.
+This document describes how execution works today in `packages/lumiseval-graph/lumiseval_graph/runner.py`.
 
-## Graph Topology
+## 1) Core Executor
 
-```text
-scan
-├─ chunk -> claims -> dedup -> {relevance, grounding}
-├─ geval_steps -> geval
-├─ redteam
-└─ reference
+`CachedNodeRunner` executes cases node-by-node with cache awareness.
 
-{relevance, grounding, geval, redteam, reference} -> eval
-```
+Two public paths:
+- `run_case(...)` for one case
+- `run_cases_iter(...)` for streaming many cases with optional concurrency
 
-## Eligibility Gates
+## 2) Initial State Construction
 
-- `generation` required for all nodes
-- `context` required for `chunk`, `claims`, `dedup`, `relevance`, `grounding`
-- `question` required for `relevance`
-- `geval.metrics` required for `geval_steps`, `geval`
-- `reference` required for `reference`
+Each case is converted into an `EvalCase`-shaped state with:
+- `record` (`case_id`, `generation`, `question`, `reference`, `context`, `geval`, `redteam`)
+- `target_node`
+- `execution_mode` (`run` or `estimate`)
+- `estimated_costs` (empty dict)
+- `node_model_usage` (empty dict)
+- optional `llm_overrides` and `reference_files`
 
-## CLI Behavior
+## 3) Plan Construction
 
-- `lumiseval estimate <target> ...`
-  - scans dataset
-  - builds cache-aware run plan
-  - computes uncached delta cost
-  - does not execute graph nodes
+Node plan is:
+- `prerequisites(target_node) + [target_node]`
+- plus `report` when target is `eval` or a metric node
 
-- `lumiseval run <target> ...`
-  - executes strict dependency chain up to `<target>`
-  - uses node cache by `(case_hash, config_hash, node_name)`
-  - for `target=eval`, metric siblings run in parallel when eligible
+Metric node set (from topology):
+- `relevance`, `grounding`, `redteam`, `geval`, `reference`
 
-## Caching
+## 4) Cache Keying and Fingerprints
 
-- Case hash inputs: `generation`, `question`, `reference`, `context`, `geval`, `reference_files`
-- Config hash inputs: `judge_model`, metric toggles, web search, evidence threshold
-- GEval step artifacts are cached separately by signature:
-  - `signature = sha256(model + prompt_version + parser_version + criteria)`
+Cache key is built from:
+- case fingerprint (`compute_case_hash`)
+- execution mode
+- node name
+- route fingerprint (dependency path + node routing config)
 
-## Concurrency
+Route fingerprint includes model-routing inputs via `get_node_config`:
+- resolved model
+- fallback model
+- temperature
 
-- `CachedNodeRunner` executes prerequisites in order.
-- For `target=eval`, these metric nodes can run concurrently:
-  - `relevance`, `grounding`, `redteam`, `geval`, `reference`
+This means model-routing changes invalidate cache for affected nodes.
 
-## Removed Legacy Surfaces
+## 5) Cache Read/Write Policy
 
-- No legacy custom-judge input aliases
-- No legacy config/API alias flags
-- No legacy node-name aliases
-- No legacy artifact/cache fallback paths
+Policy in `lumiseval_core/cache.py`:
+- reads allowed in both `run` and `estimate`
+- writes allowed in `run`
+- estimate writes are disabled by default
+- `eval` and `report` are never cacheable
+
+Estimate fallback behavior:
+- if estimate key misses, runner attempts run-mode cache lookup for same node route
+
+## 6) Execution Semantics
+
+### Sequential path
+For non-eval targets, steps run in plan order:
+1. optional cache hit path
+2. else execute `NODE_FNS[step](state)`
+3. merge patch into state
+4. optional cache write
+
+### Eval metric fan-out path
+For `target_node == "eval"`:
+- when the plan reaches first metric node, all metric siblings are processed together
+- cache hits are applied first
+- misses run concurrently in `ThreadPoolExecutor`
+- each metric task receives `deepcopy(state)` to avoid shared mutation races
+- resulting patches are merged back in stable metric order
+
+## 7) State Merge Rules
+
+Patch merge is key-aware:
+- `estimated_costs` merges by dict update
+- `node_model_usage` merges by dict update
+- all other keys overwrite directly
+
+This allows each node to contribute partial cost/model info without losing prior entries.
+
+## 8) Batch Streaming (`run_cases_iter`)
+
+`run_cases_iter` supports:
+- single-worker deterministic loop
+- multi-worker pool with bounded in-flight submissions
+- ordered emission by original input index
+
+Fail-fast behavior:
+- when `continue_on_error=False`, stream stops after first ordered failure is emitted
+
+## 9) Estimate vs Run
+
+`execution_mode="run"`:
+- real node execution, full writes to cache where allowed
+
+`execution_mode="estimate"`:
+- node estimate logic populates `estimated_costs`
+- run-mode cache can satisfy unchanged prerequisite work
+- CLI aggregates estimated costs into branch summary tables
+
+## 10) Report Node Placement
+
+`report` is appended automatically for metric/eval targets by runner planning logic.
+
+Report generation is state-projection only (`report.aggregate`) and does not perform LLM calls.

@@ -14,21 +14,45 @@ from lumiseval_core.types import (
     Claim,
     ClaimArtifacts,
     CostEstimate,
+    GevalMetrics,
+    GroundingMetrics,
     Inputs,
     Item,
     MetricCategory,
     MetricResult,
+    RedteamMetrics,
+    ReferenceMetrics,
+    RelevanceMetrics,
 )
 
+_ZERO_COST = CostEstimate(cost=0.0, input_tokens=0.0, output_tokens=0.0)
 
-def _empty_metric_groups() -> dict[str, list[MetricResult]]:
+
+def _empty_metric_groups() -> dict[str, None]:
     return {
-        "grounding_metrics": [],
-        "relevance_metrics": [],
-        "redteam_metrics": [],
-        "geval_metrics": [],
-        "reference_metrics": [],
+        "grounding_metrics": None,
+        "relevance_metrics": None,
+        "redteam_metrics": None,
+        "geval_metrics": None,
+        "reference_metrics": None,
     }
+
+
+_GROUP_KEY_TO_WRAPPER: dict[str, type] = {
+    "grounding_metrics": GroundingMetrics,
+    "relevance_metrics": RelevanceMetrics,
+    "redteam_metrics": RedteamMetrics,
+    "geval_metrics": GevalMetrics,
+    "reference_metrics": ReferenceMetrics,
+}
+
+_GROUP_KEY_TO_SECTION: dict[str, str] = {
+    "grounding_metrics": "grounding",
+    "relevance_metrics": "relevance",
+    "redteam_metrics": "redteam",
+    "geval_metrics": "geval",
+    "reference_metrics": "reference",
+}
 
 
 @pytest.mark.parametrize(
@@ -49,13 +73,19 @@ def test_report_for_metric_targets_contains_only_that_branch(
     make_metric: Callable[[str, float, MetricCategory], MetricResult],
     graph_module,
 ) -> None:
-    """
-    pytest -s packages/lumiseval-graph/test_lumiseval_graph/test_graph/test_end_metric_routes.py::test_report_for_metric_targets_contains_only_that_branch
+    """Verify eval-target report exposes exactly one metric section for each routed metric wrapper.
+
+    Run: uv run pytest -s packages/lumiseval-graph/test_lumiseval_graph/test_graph/test_end_metric_routes.py::test_report_for_metric_targets_contains_only_that_branch
     """
     groups = _empty_metric_groups()
-    groups[group_key] = [make_metric(metric_name, 0.8, category)]
+    wrapper_cls = _GROUP_KEY_TO_WRAPPER[group_key]
+    groups[group_key] = wrapper_cls(
+        metrics=[make_metric(metric_name, 0.8, category)],
+        cost=_ZERO_COST,
+    )
 
     state = {
+        "target_node": "eval",
         "job_id": f"job-{target_node}",
         **groups,
         "cost_estimate": None,
@@ -63,34 +93,50 @@ def test_report_for_metric_targets_contains_only_that_branch(
     }
 
     eval_out = graph_module.node_eval(state)
-    print("eval_out ", eval_out)
     state.update(eval_out)
     report_out = graph_module.node_report(state)
     report = report_out["report"]
 
     assert isinstance(report, dict)
     assert report["target_node"] == "eval"
-    assert isinstance(report["metrics"], list)
-    assert len(report["metrics"]) == 1
-    assert report["metrics"][0]["name"] == metric_name
+
+    section_name = _GROUP_KEY_TO_SECTION[group_key]
+    assert section_name in report
+    assert isinstance(report[section_name]["metrics"], list)
+    assert len(report[section_name]["metrics"]) == 1
 
 
 def test_report_for_eval_contains_all_metric_branches(
     make_metric: Callable[[str, float, MetricCategory], MetricResult],
     graph_module,
 ) -> None:
-    """
-    pytest -s packages/lumiseval-graph/test_lumiseval_graph/test_graph/test_end_metric_routes.py::test_report_for_eval_contains_all_metric_branches
+    """Verify eval-target report includes all metric sections when all metric wrappers are present.
+
+    Run: uv run pytest -s packages/lumiseval-graph/test_lumiseval_graph/test_graph/test_end_metric_routes.py::test_report_for_eval_contains_all_metric_branches
     """
     state = {
+        "target_node": "eval",
         "job_id": "job-eval",
-        "grounding_metrics": [make_metric("grounding", 1.0, MetricCategory.ANSWER)],
-        "relevance_metrics": [make_metric("answer_relevancy", 0.9, MetricCategory.ANSWER)],
-        "redteam_metrics": [
-            make_metric("vulnerability_prompt_injection", 0.2, MetricCategory.ANSWER)
-        ],
-        "geval_metrics": [make_metric("geval_coherence", 0.7, MetricCategory.ANSWER)],
-        "reference_metrics": [make_metric("rouge_l", 0.6, MetricCategory.RETRIEVAL)],
+        "grounding_metrics": GroundingMetrics(
+            metrics=[make_metric("grounding", 1.0, MetricCategory.ANSWER)],
+            cost=_ZERO_COST,
+        ),
+        "relevance_metrics": RelevanceMetrics(
+            metrics=[make_metric("answer_relevancy", 0.9, MetricCategory.ANSWER)],
+            cost=_ZERO_COST,
+        ),
+        "redteam_metrics": RedteamMetrics(
+            metrics=[make_metric("vulnerability_prompt_injection", 0.2, MetricCategory.ANSWER)],
+            cost=_ZERO_COST,
+        ),
+        "geval_metrics": GevalMetrics(
+            metrics=[make_metric("geval_coherence", 0.7, MetricCategory.ANSWER)],
+            cost=_ZERO_COST,
+        ),
+        "reference_metrics": ReferenceMetrics(
+            metrics=[make_metric("rouge_l", 0.6, MetricCategory.RETRIEVAL)],
+            cost=_ZERO_COST,
+        ),
         "cost_estimate": None,
         "cost_actual_usd": 0.0,
     }
@@ -102,25 +148,24 @@ def test_report_for_eval_contains_all_metric_branches(
 
     assert isinstance(report, dict)
     assert report["target_node"] == "eval"
-    metrics = report["metrics"]
-    assert isinstance(metrics, list)
-    assert len(metrics) == 5
-    assert [m["name"] for m in metrics] == [
-        "grounding",
-        "answer_relevancy",
-        "vulnerability_prompt_injection",
-        "geval_coherence",
-        "rouge_l",
-    ]
+    for section in ("grounding", "relevance", "redteam", "geval", "reference"):
+        assert section in report, f"Expected section '{section}' in report"
+        assert isinstance(report[section]["metrics"], list)
+        assert len(report[section]["metrics"]) == 1
 
 
 def test_node_eval_is_orchestration_only(graph_module) -> None:
+    """Verify node_eval is a no-op orchestration node and returns an empty patch.
+
+    Run: uv run pytest -s packages/lumiseval-graph/test_lumiseval_graph/test_graph/test_end_metric_routes.py::test_node_eval_is_orchestration_only
+    """
     assert graph_module.node_eval({}) == {}
 
 
 def test_report_for_grounding_target_includes_inputs_and_branch_nodes(graph_module) -> None:
-    """
-    pytest -s packages/lumiseval-graph/test_lumiseval_graph/test_graph/test_end_metric_routes.py::test_report_for_grounding_target_includes_inputs_and_branch_nodes
+    """Verify grounding-target report includes input fields and expected grounding/claims sections.
+
+    Run: uv run pytest -s packages/lumiseval-graph/test_lumiseval_graph/test_graph/test_end_metric_routes.py::test_report_for_grounding_target_includes_inputs_and_branch_nodes
     """
     state = {
         "target_node": "grounding",
@@ -204,28 +249,25 @@ def test_report_for_grounding_target_includes_inputs_and_branch_nodes(graph_modu
     report_out = graph_module.node_report(state)
     report = report_out["report"]
 
+    # Always-present sections
     assert report["target_node"] == "grounding"
-    assert report["inputs"]["case_id"] == "case-1"
-    assert report["inputs"]["question"] == "What is the capital of France?"
-    assert report["inputs"]["generation"] == "Paris is the capital of France."
-    assert report["inputs"]["context"] == "France has Paris as its capital."
-    assert report["inputs"]["reference"] == "Paris"
-    assert report["branch"] == ["scan", "chunk", "claims", "dedup", "grounding"]
-    assert set(report["nodes"].keys()) == {"scan", "chunk", "claims", "dedup", "grounding"}
-    assert report["nodes"]["chunk"]["eligible"] is True
-    assert report["nodes"]["chunk"]["output"] == {
-        "chunk_texts": ["Paris is the capital of France."],
-    }
-    assert report["nodes"]["claims"]["output"] == {
-        "claim_texts": ["Paris is the capital of France."],
-    }
-    assert report["nodes"]["dedup"]["output"] == {
-        "claim_texts": ["Paris is the capital of France."],
-    }
-    assert report["nodes"]["grounding"]["output"] == {
-        "metric_scores": [1.0],
-        "metric_errors": [None],
-    }
-    assert report["nodes"]["claims"]["cost"]["cost"] == pytest.approx(0.001)
-    assert report["nodes"]["grounding"]["model"]["fallback_hits"] == 1
-    assert report["nodes"]["grounding"]["model"]["fallback_used"] is True
+    assert report["input"]["case_id"] == "case-1"
+    assert report["input"]["question"] == "What is the capital of France?"
+    assert report["input"]["generation"] == "Paris is the capital of France."
+    assert report["input"]["context"] == "France has Paris as its capital."
+    assert report["input"]["reference"] == "Paris"
+
+    # Chunk section
+    assert report["chunks"]["text"] == ["Paris is the capital of France."]
+
+    # Claims section
+    assert report["claims"]["text"] == ["Paris is the capital of France."]
+    assert report["claims"]["cost"]["cost"] == pytest.approx(0.001)
+
+    # Dedup claims section
+    assert report["claims_unique"]["text"] == ["Paris is the capital of France."]
+
+    # Grounding section
+    assert isinstance(report["grounding"]["metrics"], list)
+    assert len(report["grounding"]["metrics"]) == 1
+    assert report["grounding"]["cost"]["cost"] == pytest.approx(0.002)

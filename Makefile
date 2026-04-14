@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install sync lint format typecheck test test-verbose test-pkg test_graph ci clean clean-venv
+.PHONY: help install sync lint format typecheck test test-verbose test-pkg test_graph ci clean clean-venv api
 
 # ── Variables ──────────────────────────────────────────────────────────────
 PROJECT_NAME := lumis-eval
@@ -51,9 +51,9 @@ ci: ## Run full CI pipeline locally (format check → lint → test)
 	uv run pytest
 	@echo "==> CI passed"
 
-# ── Dev servers ────────────────────────────────────────────────────────────
-api: ## Start the FastAPI dev server
-	uv run uvicorn lumiseval_api.main:app --reload --port 8080
+# ── Deprecated targets ─────────────────────────────────────────────────────
+api: ## Deprecated (API package removed)
+	@echo "The API package was removed. Use CLI commands instead (e.g. 'lumiseval --help')."
 
 # ── Clean ──────────────────────────────────────────────────────────────────
 clean: ## Remove build artifacts and caches

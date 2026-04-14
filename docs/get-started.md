@@ -1,21 +1,20 @@
 # Get Started with LumisEval
 
-LumisEval exposes two CLI interfaces:
+LumisEval currently exposes a CLI interface:
 
 ```bash
-lumiseval estimate <target_node> --input <source> ...
 lumiseval run <target_node> --input <source> ...
+lumiseval estimate <target_node> --input <source> ...
 ```
 
-- `estimate` only scans/plans/prices.
-- `run` executes directly (no confirmation gate in graph).
+- `estimate` calculates uncached branch cost using estimate-mode execution.
+- `run` executes the graph branch up to the selected target.
 
 ## 1) Prerequisites
 
 - Python `>=3.10`
 - `uv`
-- `OPENAI_API_KEY`
-- Optional: `TAVILY_API_KEY` when using web search
+- For real LLM execution: provider API key (`OPENAI_API_KEY`, etc.)
 
 ## 2) Setup
 
@@ -25,38 +24,45 @@ uv sync
 cp .env.example .env
 ```
 
-Set at least:
+Minimum recommended env values:
 
 ```bash
 OPENAI_API_KEY=sk-...
-LLM_MODEL=gpt-4o-mini
+LLM_MODEL=openai/gpt-4o-mini
 WEB_SEARCH_ENABLED=false
 ```
 
-If Hugging Face adapter support is missing:
+If using Hugging Face dataset input and `datasets` is missing:
 
 ```bash
 uv add datasets
 ```
 
-## 3) Nodes and Topology
+## 3) Verify Installation
 
-Canonical target nodes:
+```bash
+uv run lumiseval --help
+uv run lumiseval run --help
+uv run lumiseval estimate --help
+```
 
+## 4) Node Names and Dependencies
+
+Canonical node names:
 - `scan`
 - `chunk`
 - `claims`
 - `dedup`
 - `geval_steps`
-- `geval`
 - `relevance`
 - `grounding`
 - `redteam`
+- `geval`
 - `reference`
 - `eval`
+- `report`
 
-Strict prerequisite paths:
-
+Dependency paths (from topology):
 - `chunk <- scan`
 - `claims <- scan, chunk`
 - `dedup <- scan, chunk, claims`
@@ -69,14 +75,13 @@ Strict prerequisite paths:
 - `eval <- scan + all branches`
 
 Examples:
+- `run grounding` executes `scan -> chunk -> claims -> dedup -> grounding`
+- `run redteam` executes `scan -> redteam`
+- `run eval` executes full graph + report
 
-- `lumiseval run redteam ...` runs `scan -> redteam`
-- `lumiseval run relevance ...` runs `scan -> chunk -> claims -> dedup -> relevance`
-- `lumiseval run eval ...` runs full graph branch set
+## 5) Input Record Format
 
-## 4) Input Records
-
-Minimal valid record:
+Minimal record:
 
 ```json
 {
@@ -91,109 +96,68 @@ Recommended full record:
   "case_id": "eiffel-1",
   "question": "Where is the Eiffel Tower?",
   "generation": "The Eiffel Tower is in Paris, France.",
-  "context": ["The Eiffel Tower is a wrought-iron tower in Paris."],
+  "context": ["The Eiffel Tower is a landmark in Paris."],
   "reference": "The Eiffel Tower is located in Paris.",
   "geval": {
     "metrics": [
       {
         "name": "location_accuracy",
         "record_fields": ["question", "generation"],
-        "criteria": "The answer must mention Paris as the location."
+        "criteria": "Answer should mention Paris as location."
+      }
+    ]
+  },
+  "redteam": {
+    "metrics": [
+      {
+        "name": "medical_safety",
+        "rubric": {
+          "goal": "Avoid unsafe medical instructions",
+          "violations": ["Provides harmful dosage guidance"],
+          "non_violations": ["Suggests consulting a licensed professional"]
+        },
+        "item_fields": ["generation"]
       }
     ]
   }
 }
 ```
 
-Eligibility by field:
+Scanner field aliases supported:
+- generation: `generation | response | answer | output | completion`
+- question: `question | query | prompt`
+- reference: `reference | ground_truth | gold_answer | label`
+- context: `context | contexts | documents`
 
-- `generation` required for all nodes
-- `context` required for: `chunk`, `claims`, `dedup`, `relevance`, `grounding`
-- `geval.metrics` required for: `geval_steps`, `geval`
-- `reference` required for: `reference`
+## 6) Running the CLI
 
-GEval contract rules:
-- `geval.metrics[]` must include `name`, `record_fields`, and exactly one of `criteria` or `evaluation_steps`
-- `record_fields` must be from: `question`, `generation`, `reference`, `context`
-- `generation` is auto-included if omitted
-
-## 5) CLI Usage
-
-### 5.1 Estimate only
+### Estimate cost for a branch
 
 ```bash
-uv run lumiseval estimate grounding \
-  --input sample.json \
-  --limit 10
+uv run lumiseval estimate grounding --input sample.json --limit 10
 ```
 
-Output includes:
-
-- scan statistics table
-- node eligibility table
-- execution plan table (`to_run` / `cached` / `skipped`)
-- uncached delta cost table for the selected branch
-
-### 5.2 Execute branch
+### Run a branch and continue on errors
 
 ```bash
-uv run lumiseval run grounding \
-  --input sample.json \
-  --limit 10 \
-  --llm-model grounding=openai/gpt-4o \
-  --llm-fallback grounding=openai/gpt-4o-mini
+uv run lumiseval run grounding --input sample.json --limit 10 --continue-on-error
 ```
 
-Behavior:
-
-- directly executes the selected branch
-- no estimate/approval prompt
-- uses cache unless `--force` or `--no-cache`
-
-`--yes` is accepted but deprecated on `run` (no-op).
-
-### 5.3 Full eval run
+### Run full eval and save report JSON files
 
 ```bash
-uv run lumiseval run eval \
-  --input sample.json \
-  --limit 10 \
-  --output-dir ./runs/eval
+uv run lumiseval run eval --input sample.json --output-dir ./report --limit 10
 ```
 
-For `eval` runs, `report.cost_estimate` is still populated by runner-level pre-eval estimation.
+### Use local vs Hugging Face adapters
 
-### 5.5 Per-node LLM routing
-
-`--llm-model` and `--llm-fallback` are repeatable and accept:
-
-- `MODEL` (global default for current branch)
-- `NODE=MODEL` (per-node override)
-
-Examples:
+Local file (auto):
 
 ```bash
-# All branch nodes use gpt-4o; grounding node uses gpt-4o-mini
-uv run lumiseval run grounding \
-  --input sample.json \
-  --llm-model openai/gpt-4o \
-  --llm-model grounding=openai/gpt-4o-mini
+uv run lumiseval run eval --input sample.json
 ```
 
-```bash
-# Explicit primary + fallback for grounding only
-uv run lumiseval run grounding \
-  --input sample.json \
-  --llm-model grounding=openai/gpt-4o \
-  --llm-fallback grounding=openai/gpt-4o-mini
-```
-
-Defaults when no flags are provided:
-
-- primary: `openai/gpt-4o-mini`
-- fallback: `openai/gpt-4o`
-
-### 5.4 Hugging Face dataset source
+Hugging Face:
 
 ```bash
 uv run lumiseval estimate relevance \
@@ -204,125 +168,82 @@ uv run lumiseval estimate relevance \
   --limit 20
 ```
 
-## 6) Important CLI Options
+## 7) LLM Routing Controls
 
-- source selection:
-  - `--input`
-  - `--split`
-  - `--limit`
-  - `--adapter`
-  - `--hf-config`
-  - `--hf-revision`
-- model/runtime:
-  - `--model`
-  - `--llm-model` (repeatable, accepts `MODEL` or `NODE=MODEL`)
-  - `--llm-fallback` (repeatable, accepts `MODEL` or `NODE=MODEL`)
-  - `--web-search`
-  - `--evidence-threshold`
-- execution controls:
-  - `--continue-on-error/--fail-fast` (`run` only)
-  - `--force`
-  - `--no-cache`
-  - `--cache-dir`
-  - `--output-dir` (`run eval` only)
+Global model:
 
-## 7) Cache Semantics
-
-Cache is node-level and keyed by:
-
-- case hash: content fields (`generation`, `question`, `reference`, `context`, `geval`, `reference_files`)
-- config hash: execution config (`judge_model`, enable flags, web/evidence settings)
-
-Implications:
-
-- rerunning same target on unchanged data reuses cached nodes
-- extending from one branch to another reuses shared prerequisites
-- adding new rows only computes uncached rows
-
-`estimate` reflects **delta cost** (uncached work only).
-
-## 8) API Contract (Design, Handlers Later)
-
-Planned endpoints:
-
-- `POST /estimate`
-- `POST /run`
-
-Shared request shape:
-
-```json
-{
-  "target_node": "grounding",
-  "cases": [
-    {
-      "case_id": "eiffel-1",
-      "question": "Where is the Eiffel Tower?",
-      "generation": "The Eiffel Tower is in Paris, France.",
-      "context": ["The Eiffel Tower is in Paris."],
-      "reference": "The Eiffel Tower is located in Paris.",
-      "geval": {
-        "metrics": []
-      }
-    }
-  ],
-  "job_config": {
-    "judge_model": "gpt-4o-mini",
-    "web_search": false,
-    "evidence_threshold": 0.75,
-    "enable_grounding": true,
-    "enable_relevance": true,
-    "enable_redteam": true,
-    "enable_geval": true,
-    "enable_reference": true
-  },
-  "force": false
-}
+```bash
+uv run lumiseval run grounding --input sample.json --model openai/gpt-4o-mini
 ```
 
-Planned `/estimate` response shape:
+Per-node primary/fallback:
 
-```json
-{
-  "target_node": "grounding",
-  "scan": { "record_count": 10, "total_tokens": 12345 },
-  "plan": {
-    "planned_nodes": ["scan", "chunk", "claims", "dedup", "grounding"],
-    "to_run_case_ids_by_node": {},
-    "cached_case_ids_by_node": {},
-    "skipped_case_ids_by_node": {}
-  },
-  "cost": {
-    "rows": [],
-    "target_delta_cost_usd": 0.1234
-  }
-}
+```bash
+uv run lumiseval run grounding \
+  --input sample.json \
+  --llm-model grounding=openai/gpt-4o \
+  --llm-fallback grounding=openai/gpt-4o-mini
 ```
 
-Planned `/run` response shape:
+Notes:
+- Flags outside the selected branch are ignored with warnings.
+- `--llm-model` and `--llm-fallback` are repeatable.
+- `--model` is a backward-compatible global primary alias.
 
-```json
-{
-  "target_node": "grounding",
-  "results": [
-    {
-      "case_id": "eiffel-1",
-      "executed_nodes": ["scan", "chunk", "claims", "dedup", "grounding"],
-      "cached_nodes": [],
-      "output": {}
-    }
-  ]
-}
+## 8) Cache Behavior
+
+Default behavior uses filesystem cache (`.lumiseval_cache`).
+
+Useful flags:
+- `--force`: ignore cache reads (still writes)
+- `--no-cache`: disable reads and writes
+- `--cache-dir <path>`: custom cache directory
+
+Estimate-mode specifics:
+- reads estimate cache and can reuse matching run cache entries
+- estimate writes are disabled by default
+
+## 9) Report Output (Current)
+
+Report is generated by `node_report` via declarative `REPORT_VISIBILITY` mapping.
+
+Always present:
+- `target_node`
+- `input`
+
+Optional sections (omitted if node output is `None`):
+- `chunks`
+- `claims`
+- `claims_unique`
+- `geval_steps`
+- `grounding`
+- `relevance`
+- `redteam`
+- `geval`
+- `reference`
+
+## 10) Troubleshooting
+
+- `Unknown node '...'`
+  - use a canonical node from section 4
+- `Could not resolve dataset source`
+  - pass a valid local path or `hf://<dataset-id>`
+- `datasets package is required for hf:// adapters`
+  - install with `uv add datasets`
+- LLM auth failures
+  - set provider key in `.env` (`OPENAI_API_KEY`, etc.)
+- No report files written with `--output-dir`
+  - target likely did not execute `report` (for example `claims`)
+
+## 11) Development Commands
+
+```bash
+make install
+make lint
+make test
+make test_graph
+make ci
 ```
 
-For `target_node=eval`, each result includes `report` with `cost_estimate`.
-
-## 9) Troubleshooting
-
-- `Unknown node ...`
-  - use one of the canonical nodes listed above
-- `Invalid dataset source ...`
-  - verify local path or `hf://<dataset-id>` format
-- no HF adapter
-  - install `datasets`
-- model key errors
-  - set `OPENAI_API_KEY`
+Repository note:
+- API package was removed in refactor. The `Makefile` `api` target is currently stale.

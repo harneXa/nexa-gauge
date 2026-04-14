@@ -12,24 +12,29 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from lumiseval_core.types import MetricCategory, MetricResult
+from lumiseval_core.types import MetricCategory, MetricResult  # noqa: F401 – used by fake nodes
 
 ROOT = Path(__file__).resolve().parents[3]
 SAMPLE_PATH = ROOT / "sample.json"
 
 
-def _print_metrics(report: list[dict[str, Any]], title: str) -> None:
+METRIC_SECTIONS = ("grounding", "relevance", "redteam", "geval", "reference")
+
+
+def _print_report(report: dict[str, Any], title: str) -> None:
     print(f"\n{title}")
     print("=" * len(title))
-    if not report:
-        print("No metrics found in report.")
+    if not isinstance(report, dict):
+        print("No report found.")
         return
-    for idx, metric in enumerate(report, start=1):
-        print(
-            f"{idx}. name={metric.get('name')}  "
-            f"category={metric.get('category')}  "
-            f"score={metric.get('score')}"
-        )
+    for section in METRIC_SECTIONS:
+        if section not in report:
+            continue
+        metrics = report[section].get("metrics", [])
+        cost = report[section].get("cost", {})
+        print(f"\n  [{section}]  metrics={len(metrics)}  cost={cost.get('cost', 0)}")
+        for idx, result in enumerate(metrics, 1):
+            print(f"    {idx}. result={result}")
 
 
 def _try_real_cli_eval() -> bool:
@@ -62,13 +67,9 @@ def _try_real_cli_eval() -> bool:
         return False
 
     first_report = json.loads(report_files[0].read_text(encoding="utf-8"))
-    if isinstance(first_report, dict):
-        metrics = first_report.get("metrics", [])
-    elif isinstance(first_report, list):
-        metrics = first_report
-    else:
-        metrics = []
-    _print_metrics(metrics, "Metrics From Real CLI Run (first case)")
+    if not isinstance(first_report, dict):
+        first_report = {}
+    _print_report(first_report, "Metrics From Real CLI Run (first case)")
     print(f"\nReport files written: {len(report_files)} at {out_dir}")
     return True
 
@@ -174,8 +175,8 @@ def _run_mocked_graph_eval() -> None:
 
     final_state = app.invoke(state)
     report_out = graph.node_report(final_state)
-    report = report_out.get("report", [])
-    _print_metrics(report, "Metrics From Mocked Graph Run (all branches)")
+    report = report_out.get("report", {})
+    _print_report(report, "Metrics From Mocked Graph Run (all branches)")
 
 
 def main() -> None:
