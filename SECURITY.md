@@ -15,7 +15,6 @@ Please do not open public GitHub issues for security vulnerabilities.
 
 Use one of these private channels:
 - GitHub Security Advisories: `Security` tab -> `Report a vulnerability`
-- Email: `sardhendu+lumiseval-security@proton.me`
 
 When reporting, include:
 - affected version / commit

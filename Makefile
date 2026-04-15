@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install sync lint format typecheck test test-verbose test-pkg test_graph ci clean clean-venv api
+.PHONY: help install sync lint lint-fix format typecheck test test-verbose test-pkg test_graph ci clean clean-venv api
 
 # ── Variables ──────────────────────────────────────────────────────────────
 PROJECT_NAME := lumis-eval
@@ -19,8 +19,11 @@ sync: ## Sync dependencies from lockfile (no install)
 	uv sync
 
 # ── Code quality ───────────────────────────────────────────────────────────
-lint: ## Run ruff linter
-	uv run ruff check .
+lint: ## Run ruff linter (use FIX=1 to apply fixes)
+	uv run ruff check $(if $(FIX),--fix,) .
+
+lint-fix: ## Run ruff linter and apply safe fixes
+	uv run ruff check --fix .
 
 format: ## Auto-format with ruff
 	uv run ruff format .
