@@ -343,6 +343,7 @@ def node_geval_steps(state: EvalCase) -> dict[str, Any]:
     node = GevalStepsNode(
         judge_model=model,
         llm_overrides=llm_overrides,
+        artifact_cache_store=state.get("__cache_store"),
     )
     if estimate_mode:
         estimated_cost = node.estimate(input_tokens=0.0, output_tokens=0.0)

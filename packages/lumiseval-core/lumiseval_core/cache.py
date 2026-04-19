@@ -1,16 +1,200 @@
 """Key-value node cache for LumisEval.
 
-The cache stores per-node execution patches under an opaque `cache_key`.
-Key construction is owned by the runner so it can encode case fingerprint,
-execution mode, node route/model routing, and dependency chain versioning.
+==============================================================================
+What this module is
+==============================================================================
 
-Storage layout:
-    {cache_dir}/kv/{prefix}/{sha256(cache_key)}.json
+A thin opaque-key key-value store used by two kinds of caches in the pipeline:
 
-Each entry stores:
-  - `cache_key` and `node_name` for validation/debugging
-  - serialized `node_output` patch
-  - optional free-form `metadata`
+1. **Per-node output cache** — the runner consults this before executing every
+   node in a plan. A hit short-circuits the node; a miss runs the node and
+   writes the result. Keyed by "which case × which node × which path got us
+   here × which model is wired up".
+
+2. **GEval step artifact cache** — node-internal, keyed by criteria signature
+   so N cases sharing a criterion trigger ONE LLM call. It deliberately does
+   NOT include the case content in its key. Same backend, different namespace.
+
+Both share this module's ``CacheStore`` / ``NoOpCacheStore`` (the latter is
+installed by ``--no-cache``).
+
+==============================================================================
+Storage layout
+==============================================================================
+
+    {cache_dir}/kv/{sha256(cache_key)[:2]}/{sha256(cache_key)}.json
+
+Each file is a JSON envelope (:class:`KVCacheEntry`) carrying:
+    cache_key    — the original opaque string (used to validate reads)
+    node_name    — human-readable node tag for audits
+    created_at   — ISO-8601 UTC timestamp
+    node_output  — the JSON-serialized patch the node emitted
+    metadata     — free-form; runner stamps execution_mode + case_fingerprint
+
+Writes go via ``tmp + os.replace`` (atomic) so concurrent workers never see a
+torn file.
+
+==============================================================================
+Cache key anatomy  (this is the part to read before adding keys)
+==============================================================================
+
+All keys start with ``CACHE_KEY_VERSION`` (currently ``"v2"``). Bump that
+constant to invalidate every entry across the whole store at once.
+
+──────────────────────────────────────────────────────────────────────────────
+ (A) Per-node output key  — built by :func:`build_node_cache_key`
+──────────────────────────────────────────────────────────────────────────────
+
+    v2:{execution_mode}:{node_name}:{case_fingerprint}:{node_route_fingerprint}
+
+Five axes, each orthogonal:
+
+  1. ``execution_mode``  — ``"run"`` vs ``"estimate"``. Different modes get
+     different entries because estimate mode produces cost-only stubs that
+     ``run`` must not see.
+
+  2. ``node_name``       — e.g. ``"grounding"``, ``"claims"``. Node-level
+     isolation: changing ``claims`` must not evict ``redteam``.
+
+  3. ``case_fingerprint`` — SHA-256 of case content, computed by
+     :func:`compute_case_hash`. Controls "is this the same input?".
+     **Inputs currently hashed:**
+         generation (str)
+         question (str | None)
+         reference (str | None)
+         context (list[str] | None)           ← joined with "|"
+         geval metric spec, per metric:       ← name, item_fields,
+             name                               criteria text, steps text
+             item_fields                        (joined, sorted)
+             criteria.text
+             evaluation_steps[*].text
+         redteam metric spec, per metric:     ← name, item_fields,
+             name                               rubric goal,
+             item_fields                        violations,
+             rubric.goal                        non_violations
+             rubric.violations
+             rubric.non_violations
+         reference_files (list[str])          ← sorted, joined
+
+     **Want a new case-content dimension to affect cache validity?**
+     Edit :func:`compute_case_hash` here. Anything NOT included is ignored
+     by the cache — two cases differing only in that field share an entry.
+     (If the schema change is also a breaking data shape change, also bump
+     ``CACHE_KEY_VERSION`` to force-miss historical entries.)
+
+  4. ``node_route_fingerprint`` — NOT computed in this file. The runner
+     (``lumiseval_graph/runner.py``) builds it by chaining, for this node
+     AND every prerequisite node in its plan path:
+         model             (resolved via llm_overrides → node config → cfg)
+         fallback_model
+         temperature
+         execution_mode
+         node_name
+     So a cache hit requires: every upstream node on the path used the same
+     model routing AND every upstream node itself was cacheable. This is the
+     "did anything in my dependency chain change?" check.
+
+     **Want a new routing dimension to affect cache validity?**
+     Edit ``_node_route_fingerprint`` in ``runner.py`` — this file doesn't
+     see routing; it just accepts whatever opaque string the runner hands in.
+
+  5. ``CACHE_KEY_VERSION`` — global prefix. Bump to mass-invalidate.
+
+──────────────────────────────────────────────────────────────────────────────
+ (B) GEval artifact key  — built by ``build_geval_artifact_cache_key``
+     (lives in ``lumiseval_graph/nodes/metrics/geval/cache.py``)
+──────────────────────────────────────────────────────────────────────────────
+
+    v2:geval_artifact:{signature}
+
+where ``signature = sha256(model | prompt_version | parser_version |
+                           sorted(item_fields) | criteria.strip())[:24]``.
+
+Intentionally case-independent: two different cases that share a criterion
+produce the same signature → one cached LLM response, reused N times. This
+is the core cost optimisation from the G-Eval paper applied to our runner.
+
+**Want to add a dimension that invalidates step generation?**
+Edit ``compute_geval_signature`` in the graph package. Bumping
+``GEVAL_STEPS_PROMPT_VERSION`` or ``GEVAL_STEPS_PARSER_VERSION`` there is the
+surgical way to bust only GEval-step artifacts without touching per-node
+output keys.
+
+==============================================================================
+Policy gates  (who may read / write the cache and when)
+==============================================================================
+
+- ``NON_CACHEABLE_NODES``  — ``{"eval", "report"}``. These are pure
+  aggregation / presentation; their outputs are fast to recompute and depend
+  on upstream artifacts that ARE cached. Reads and writes are always denied.
+  Add here to exclude a new node.
+
+- ``ESTIMATE_CACHE_WRITE_NODES`` — allowlist for ``execution_mode == "estimate"``
+  writes. Empty by default: estimate mode READS from run-mode entries (via
+  fallback in the runner) but does not write, so speculative cost runs can't
+  poison the real cache. If a new node has a stable estimate with value
+  worth persisting, add its name here.
+
+- ``cache_read_allowed`` / ``cache_write_allowed`` — the policy functions
+  the runner consults. Change these (not individual call sites) to adjust
+  semantics globally.
+
+==============================================================================
+Deserialisation  —  ``_FIELD_TYPE_MAP``
+==============================================================================
+
+Envelopes on disk are plain JSON. On read, :func:`_deserialize` walks the
+``node_output`` dict and reconstructs typed Pydantic objects by key name.
+
+**Want to cache a new Pydantic-typed field in a node output?**
+Add an entry to ``_FIELD_TYPE_MAP``:
+    "my_new_field": MyNewModel              # single model
+    "my_list_field": (list, MyNewModel)     # list of models
+Primitives (str/int/float/bool/list-of-primitives) don't need an entry; they
+pass through unchanged.
+
+Two special-case branches live inside ``_deserialize``:
+- ``_METRIC_GROUP_FIELDS`` — any of these as a list → ``list[MetricResult]``.
+  Add the field name here when registering a new metric-group node.
+- ``estimated_costs`` dict → ``dict[str, CostEstimate]``.
+- ``report`` dict/list → passed through raw (aggregation is structural).
+
+==============================================================================
+Backends
+==============================================================================
+
+:class:`CacheStore` — disk-backed; default path is ``$LUMISEVAL_CACHE_DIR`` or
+``constants.CACHE_DIR``.
+
+:class:`NoOpCacheStore` — inherits from CacheStore; every method is a no-op.
+Installed by the runner when ``--no-cache`` is passed. Because the node code
+only talks to the :class:`NodeCacheBackend` Protocol (``has_key`` /
+``get_entry_by_key`` / ``put_by_key``), nothing downstream needs to care
+which backend is active.
+
+==============================================================================
+TL;DR  —  "I want to add a new cache dimension"
+==============================================================================
+
+- Input content of the case (e.g. a new ``metadata`` block in records)
+      → add it to :func:`compute_case_hash`.
+
+- Model routing (e.g. a new per-node ``top_p`` setting)
+      → add it to ``_node_route_fingerprint`` in runner.py.
+
+- A new node with typed output that should survive cache round-trips
+      → add an entry to ``_FIELD_TYPE_MAP`` (and ``_METRIC_GROUP_FIELDS``
+        if it's a metric node).
+
+- A new node that should never be cached (pure aggregation / side-effect)
+      → add its name to ``NON_CACHEABLE_NODES``.
+
+- Mass-invalidate everything after a breaking change
+      → bump ``CACHE_KEY_VERSION``.
+
+- Invalidate only GEval step artifacts after a prompt change
+      → bump ``GEVAL_STEPS_PROMPT_VERSION`` / ``GEVAL_STEPS_PARSER_VERSION``
+        in ``lumiseval_graph/nodes/metrics/geval/cache.py``.
 """
 
 import hashlib
@@ -33,6 +217,7 @@ from lumiseval_core.types import (
     Geval,
     GevalConfig,
     GevalMetrics,
+    GevalCacheArtifact,
     GevalStepsArtifacts,
     GroundingMetrics,
     Inputs,
@@ -57,6 +242,7 @@ _FIELD_TYPE_MAP: dict[str, Any] = {
     "raw_claims": (list, Claim),
     "unique_claims": (list, Claim),
     "geval_steps": GevalStepsArtifacts,
+    "geval_artifact": GevalCacheArtifact,
     "grounding_metrics": GroundingMetrics,
     "relevance_metrics": RelevanceMetrics,
     "redteam_metrics": RedteamMetrics,

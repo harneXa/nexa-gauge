@@ -118,6 +118,15 @@ def run(
         "-o",
         help="Write per-case JSON report output here when a run produces `report`.",
     ),
+    debug: bool = typer.Option(
+        False,
+        "--debug",
+        help=(
+            "Emit a colored per-node line (from the node's spec color) when each "
+            "node starts running for a case. Excludes pure orchestration nodes "
+            "(eval, report, chunk)."
+        ),
+    ),
 ) -> None:
     """Execute selected cases up to `node_name` without preflight prompts."""
     del web_search, evidence_threshold
@@ -189,6 +198,7 @@ def run(
         max_workers=max_workers,
         max_in_flight=max_in_flight,
         continue_on_error=continue_on_error,
+        debug=debug,
     ):
         if outcome.result is not None:
             result = outcome.result

@@ -202,3 +202,8 @@ NODE_ORDER: list[str] = [s.name for s in PIPELINE]
 
 METRIC_NODES: list[str] = [s.name for s in PIPELINE if s.is_metric]
 """Ordered list of metric node names (the parallel fan-out group)."""
+
+# Nodes excluded from --debug per-case logging. These are either pure
+# orchestration joins or declarative aggregation — no LLM work to narrate.
+DEBUG_SKIP_NODES: frozenset[str] = frozenset({"eval", "report", "scan"})
+

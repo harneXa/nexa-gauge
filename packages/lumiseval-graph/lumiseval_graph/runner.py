@@ -29,12 +29,34 @@ from lumiseval_core.types import EvalCase
 from pydantic import BaseModel
 
 from lumiseval_graph.llm.config import get_node_config
+from lumiseval_graph.log import get_node_logger
 from lumiseval_graph.registry import NODE_FNS
-from lumiseval_graph.topology import METRIC_NODES, NODES_BY_NAME
+from lumiseval_graph.topology import METRIC_NODES, NODES_BY_NAME, DEBUG_SKIP_NODES
+
+def _debug_log_running(node_name: str, case_id: str) -> None:
+    if node_name in DEBUG_SKIP_NODES:
+        return
+    get_node_logger(node_name).start(f"Running for case={case_id}")
 
 
 class CachedNodeRunResult(BaseModel):
-    """Result payload for cache-aware single-case execution."""
+    """Outcome of running a single target node (and its prerequisites) for one case.
+
+    Produced by :meth:`CachedNodeRunner.run_case` and consumed by the CLI
+    (`lumiseval run …`) plus any callable that wraps the runner — notably the
+    adapter in ``lumiseval`` that writes per-case JSON into ``--output-dir``.
+
+    Fields:
+        node_name: Target node requested by the caller (e.g. ``"geval_steps"``).
+        case_id: Stable identifier pulled from the input record.
+        executed_nodes: Nodes actually run for this case (cache miss).
+        cached_nodes: Nodes served from the node-level cache (cache hit).
+        node_output: Patch emitted by the *target* node only — what downstream
+            reporting typically cares about when the target isn't ``report``.
+        final_state: Merged :class:`EvalCase` state after the full plan ran;
+            report aggregation reads from this.
+        elapsed_ms: Wall-clock for the full per-case plan.
+    """
 
     node_name: str
     case_id: str
@@ -46,14 +68,35 @@ class CachedNodeRunResult(BaseModel):
 
 
 class BatchRunResult(BaseModel):
-    """Batch execution result for many records."""
+    """Aggregated result shape for a whole-batch (non-streaming) execution.
+
+    Retained as a convenience container for callers that collect all outcomes
+    before returning. The streaming path (:meth:`CachedNodeRunner.run_cases_iter`)
+    yields :class:`CaseRunOutcome` instances instead and is preferred for CLI
+    progress reporting.
+
+    Fields:
+        results: Successful per-case results in submission order.
+        failures: ``(case_id, traceback_text)`` pairs for cases that raised.
+    """
 
     results: list[CachedNodeRunResult]
     failures: list[tuple[str, str]]
 
 
 class CaseRunOutcome(BaseModel):
-    """Ordered streaming outcome for one submitted case."""
+    """One element yielded by :meth:`CachedNodeRunner.run_cases_iter`.
+
+    Guarantees output in *submission order* even when workers finish out of
+    order — the runner buffers completions and releases them contiguously from
+    ``emit_index``. Exactly one of ``result`` / ``error`` is set.
+
+    Fields:
+        index: Zero-based position within the input iterable.
+        case_id: Resolved case identifier (``"unknown-case"`` if missing).
+        result: Populated on success.
+        error: Formatted ``str(exc) + traceback`` on failure.
+    """
 
     index: int
     case_id: str
@@ -62,18 +105,35 @@ class CaseRunOutcome(BaseModel):
 
 
 def _case_value(case: Any, key: str, default: Any = None) -> Any:
+    """Read ``key`` off a case whether it's a dict or an attribute-bearing object.
+
+    The CLI feeds dicts loaded from JSON; tests and programmatic callers
+    occasionally pass Pydantic models. One accessor keeps the rest of this
+    module agnostic to that.
+    """
     if isinstance(case, dict):
         return case.get(key, default)
     return getattr(case, key, default)
 
 
 def _case_id(case: Any) -> str:
+    """Return a non-empty, stripped case id, falling back to ``"unknown-case"``.
+
+    Used for cache keys, log lines, and :class:`CaseRunOutcome` reporting, so
+    it must never be the empty string.
+    """
     value = _case_value(case, "case_id", "")
     text = str(value).strip()
     return text or "unknown-case"
 
 
 def _stable_json(obj: Any) -> str:
+    """Deterministic JSON encoding for hashing (sorted keys, compact, Pydantic-aware).
+
+    Pydantic models are unwrapped via ``model_dump``/``dict`` so two
+    structurally-equal states always produce byte-identical output — the whole
+    basis of the node-level cache.
+    """
     def _default(value: Any) -> Any:
         if hasattr(value, "model_dump"):
             return value.model_dump()
@@ -85,6 +145,15 @@ def _stable_json(obj: Any) -> str:
 
 
 def _build_initial_state(case: dict[str, Any], *, execution_mode: str, target_node: str) -> EvalCase:
+    """Construct the initial :class:`EvalCase` state from a raw input record.
+
+    This is the seed state every plan node receives; node outputs are merged in
+    via :func:`_merge_state_patch`. Only the fields the scanner and downstream
+    nodes actually read are extracted — extra keys on the input record are
+    ignored by design.
+
+    Called once per case at the top of :meth:`CachedNodeRunner.run_case`.
+    """
     record = {
         "case_id": _case_id(case),
         "generation": _case_value(case, "generation"),
@@ -106,6 +175,12 @@ def _build_initial_state(case: dict[str, Any], *, execution_mode: str, target_no
 
 
 def _compute_case_fingerprint(case: dict[str, Any]) -> str:
+    """Hash the *input* of a case — the root of every cache key for that case.
+
+    Excludes run-time concerns (target node, execution_mode, model routing);
+    those enter via :func:`_step_fingerprint` further down. The delegate lives
+    in ``lumiseval_core.cache`` so core and graph packages agree on the hash.
+    """
     return compute_case_hash(
         generation=_case_value(case, "generation", ""),
         question=_case_value(case, "question"),
@@ -120,6 +195,13 @@ def _compute_case_fingerprint(case: dict[str, Any]) -> str:
 def _node_route_fingerprint(
     node_name: str, *, state: Mapping[str, Any], execution_mode: str
 ) -> str:
+    """Hash the LLM routing for a node — model, fallback, temperature, mode.
+
+    This is the "did the model selection change?" component of a cache key.
+    Swapping ``gpt-4o-mini`` for ``gpt-4o`` (or flipping ``run``↔``estimate``)
+    must invalidate cached outputs; changing an unrelated node's routing must
+    not. Called from :func:`_step_fingerprint`.
+    """
     llm_overrides = state.get("llm_overrides")
     node_cfg = get_node_config(node_name, llm_overrides=llm_overrides)
     resolved_model = node_cfg.model or cfg.LLM_MODEL
@@ -140,6 +222,13 @@ def _step_fingerprint(
     state: Mapping[str, Any],
     execution_mode: str,
 ) -> str:
+    """Chain ``parent_fingerprint`` with this node's identity + routing.
+
+    Produces the path-dependent fingerprint used to build this step's cache
+    key. Chaining guarantees that a node's cache entry is only valid when the
+    *entire upstream path* that produced its inputs is identical. Called once
+    per plan step inside :meth:`CachedNodeRunner.run_case`.
+    """
     route_fingerprint = _node_route_fingerprint(
         node_name,
         state=state,
@@ -156,6 +245,12 @@ def _cache_key_for_step(
     step_fingerprint: str,
     execution_mode: str,
 ) -> str:
+    """Assemble the opaque backend cache key for a single step execution.
+
+    Delegates to ``lumiseval_core.cache.build_node_cache_key`` so the exact
+    key format stays in one place and is backend-agnostic (disk today,
+    potentially Redis/Dynamo later).
+    """
     return build_node_cache_key(
         case_fingerprint=case_fingerprint,
         node_name=node_name,
@@ -171,10 +266,13 @@ def _step_fingerprint_for_node_branch(
     state: Mapping[str, Any],
     execution_mode: str,
 ) -> str:
-    """Compute a node fingerprint from its own branch prerequisites.
+    """Compute a node's fingerprint from *its own* prerequisite branch only.
 
-    This keeps cache keys stable for a node regardless of which target branch
-    triggered execution (for example `run grounding` vs `estimate eval`).
+    Used for the parallel metrics group in :meth:`CachedNodeRunner.run_case`
+    (the ``eval`` target fans out to N metric nodes concurrently). Each metric
+    must key itself against its intrinsic branch — not the order the scheduler
+    happened to fan them out in — so ``run grounding`` and ``estimate eval``
+    hit the same cache entry for grounding.
     """
     parent_fingerprint = case_fingerprint
     for prereq in NODES_BY_NAME[node_name].prerequisites:
@@ -193,14 +291,34 @@ def _step_fingerprint_for_node_branch(
 
 
 def _plan_nodes(node_name: str) -> list[str]:
+    """Build the ordered list of nodes to execute for a requested target.
+
+    Returns ``[*prerequisites, target, "report"?]``. ``report`` is appended
+    unconditionally (unless the target *is* report) so intermediate targets
+    like ``geval_steps`` / ``chunk`` / ``claims`` still emit per-case JSON for
+    ``--output-dir``. Report aggregation is declarative and section-gated, so
+    missing upstream artifacts are just omitted — never an error.
+    """
     plan = list(NODES_BY_NAME[node_name].prerequisites) + [node_name]
-    needs_report = node_name == "eval" or node_name in METRIC_NODES
-    if needs_report and node_name != "report" and "report" not in plan and "report" in NODE_FNS:
+    # Always append report so intermediate targets (geval_steps, chunk, claims, dedup)
+    # still produce per-case JSON for --output-dir. Report is declarative aggregation
+    # over final_state with gated sections, so missing upstream artifacts are simply
+    # omitted rather than errored.
+    if node_name != "report" and "report" not in plan and "report" in NODE_FNS:
         plan.append("report")
     return plan
 
 
 def _merge_state_patch(state: dict[str, Any], patch: Mapping[str, Any]) -> None:
+    """Apply a node's output patch into ``state`` in place.
+
+    Most keys are overwritten wholesale — node outputs are authoritative for
+    the artifact they produce. Two keys are accumulators and get *shallow
+    merged* so later nodes don't clobber earlier nodes' entries:
+
+    - ``estimated_costs`` — per-node cost estimates, keyed by node name.
+    - ``node_model_usage`` — per-node model usage tallies for fallback tracking.
+    """
     for key, value in patch.items():
         if key == "estimated_costs" and isinstance(value, Mapping):
             existing = state.get("estimated_costs")
@@ -218,19 +336,48 @@ def _merge_state_patch(state: dict[str, Any], patch: Mapping[str, Any]) -> None:
 
 
 class CachedNodeRunner:
-    """Execute pipeline nodes with graph-aligned state and node-level cache reuse."""
+    """Execute a target node (plus its prerequisites + report) with per-node caching.
+
+    This is the engine behind every ``lumiseval run <node>`` / ``lumiseval estimate <node>``
+    invocation. Responsibilities:
+
+    1. Expand a target into an ordered plan via :func:`_plan_nodes`.
+    2. For each plan step, compute a path-chained fingerprint and look up a
+       cached output; on hit, merge the cached patch into state and skip execution.
+    3. On miss, invoke the node function from :data:`NODE_FNS`, merge its
+       patch, and (when policy allows) write the output back to the cache.
+    4. Fan out the metric group in parallel when the target is ``eval``.
+    5. Provide ordered streaming over many cases via :meth:`run_cases_iter`.
+
+    The backend is injected (:class:`NodeCacheBackend`) so tests can use an
+    in-memory store while production uses the disk-backed implementation.
+    """
 
     def __init__(self, cache_store: NodeCacheBackend) -> None:
+        """Store the cache backend. Does no I/O."""
         self._cache = cache_store
 
     @staticmethod
     def _normalize_max_in_flight(*, max_workers: int, max_in_flight: int | None) -> int:
+        """Pick a sane in-flight cap for streaming execution.
+
+        Default is ``2 × max_workers`` so the pool stays fed while the consumer
+        drains ordered results. Never lets the cap dip below ``max_workers``
+        (which would starve the pool). Called once at the start of
+        :meth:`run_cases_iter`.
+        """
         workers = max(1, max_workers)
         if max_in_flight is None:
             return max(1, workers * 2)
         return max(workers, max_in_flight)
 
     def _read_step_cache(self, cache_key: str) -> dict[str, Any] | None:
+        """Fetch a raw cached node output by opaque key, or ``None`` on miss.
+
+        The backend stores ``{"node_output": ..., "metadata": ...}``; this
+        returns only the output payload since the runner doesn't need metadata
+        on read.
+        """
         entry = self._cache.get_entry_by_key(cache_key)
         if entry is None:
             return None
@@ -246,6 +393,22 @@ class CachedNodeRunner:
         execution_mode: str,
         force: bool,
     ) -> tuple[dict[str, Any] | None, str | None]:
+        """Look up a cached node output, with cross-mode fallback for ``estimate``.
+
+        Precedence:
+
+        1. Honor ``force`` and per-node/per-mode read policy. If reads are
+           forbidden, return ``(None, None)`` immediately.
+        2. Try the primary key (same ``execution_mode`` as the request).
+        3. Only when the caller is running ``estimate`` and has supplied a
+           ``run`` fingerprint, fall back to the matching ``run``-mode entry —
+           a prior real run is a valid substitute for an estimate that would
+           otherwise have to re-execute.
+
+        Returns ``(output, source_mode)`` where ``source_mode`` is the mode
+        the hit came from (``"run"`` or ``"estimate"``), or ``(None, None)``
+        on miss.
+        """
         if force:
             return None, None
         if not cache_read_allowed(execution_mode=execution_mode, node_name=node_name):
@@ -284,6 +447,12 @@ class CachedNodeRunner:
         execution_mode: str,
         case_fingerprint: str,
     ) -> None:
+        """Persist a freshly-computed node output under its cache key.
+
+        Only called when :func:`cache_write_allowed` says this ``(mode, node)``
+        pair is writable. Metadata stamps the entry with the schema version
+        (``"v2"``) so future migrations can detect legacy payloads.
+        """
         self._cache.put_by_key(
             cache_key,
             node_name,
@@ -302,18 +471,52 @@ class CachedNodeRunner:
         node_name: str,
         force: bool = False,
         execution_mode: str = "run",
+        debug: bool = False,
     ) -> CachedNodeRunResult:
+        """Execute the full plan for one case and return a :class:`CachedNodeRunResult`.
+
+        This is the central per-case entry point. High-level shape:
+
+        - Resolve target and build initial :class:`EvalCase` state.
+        - Compute the case fingerprint (input hash) that roots every step key.
+        - Walk the plan linearly, except when the target is ``eval``: at the
+          start of the metric group, fan out all :data:`METRIC_NODES` across a
+          :class:`ThreadPoolExecutor` on deep-copied state snapshots (avoids
+          shared-mutation races on nested Pydantic objects), collect outputs
+          in a stable order, merge them, then advance ``i`` past the group.
+        - Each non-parallel step chains its fingerprint off the current
+          ``path_fingerprint``, consults the cache (with run-mode fallback for
+          estimate), executes on miss, merges the patch, and records timing.
+
+        Parameters:
+            case: Raw input record (dict, typically parsed from sample JSON).
+            node_name: Target node. Must be a key in :data:`NODE_FNS`.
+            force: Bypass all cache reads; still writes when policy allows.
+            execution_mode: ``"run"`` for real execution, ``"estimate"`` for
+                cost-only dry runs. Affects routing, cache namespacing, and
+                cross-mode fallback.
+
+        Raises:
+            ValueError: If ``node_name`` isn't registered.
+            Exception: Any exception raised by a node function propagates.
+                :meth:`run_cases_iter` captures it as a :class:`CaseRunOutcome`.
+        """
         if node_name not in NODE_FNS:
             valid = ", ".join(sorted(NODE_FNS))
             raise ValueError(f"Unknown node '{node_name}'. Valid options: {valid}.")
 
         t0 = time.monotonic()
+        case_id_for_log = _case_id(case)
 
         state: EvalCase = _build_initial_state(
             case,
             execution_mode=execution_mode,
             target_node=node_name,
         )
+        # Under-dunder: runner-internal plumbing that nodes may read but never
+        # emit in their output patches. Lets `GevalStepsNode` reuse the
+        # runner's cache policy (e.g. NoOpCacheStore when --no-cache is set).
+        state["__cache_store"] = self._cache
 
         case_fingerprint = _compute_case_fingerprint(case)
 
@@ -374,6 +577,9 @@ class CachedNodeRunner:
 
                 run_group_outputs: dict[str, dict[str, Any]] = {}
                 if to_run:
+                    if debug:
+                        for metric_step, _, _ in to_run:
+                            _debug_log_running(metric_step, case_id_for_log)
                     with ThreadPoolExecutor(max_workers=len(to_run)) as pool:
                         # Use an isolated snapshot per metric task to avoid shared
                         # nested object mutation races in parallel execution.
@@ -465,6 +671,8 @@ class CachedNodeRunner:
                 i += 1
                 continue
 
+            if debug:
+                _debug_log_running(step, case_id_for_log)
             output = NODE_FNS[step](state)
             _merge_state_patch(state, output)
             if cache_write_allowed(execution_mode=execution_mode, node_name=step):
@@ -504,7 +712,39 @@ class CachedNodeRunner:
         max_workers: int = 1,
         max_in_flight: int | None = None,
         continue_on_error: bool = True,
+        debug: bool = False,
     ) -> Iterator[CaseRunOutcome]:
+        """Stream per-case outcomes in *submission order* with optional parallelism.
+
+        Used by the CLI progress bar and the output-dir writer: both need
+        stable ordering so record N's file always corresponds to input row N,
+        even when worker N finishes before worker N-1.
+
+        Behavior:
+
+        - ``max_workers == 1``: simple serial loop, yields as each case
+          completes.
+        - ``max_workers > 1``: submits up to ``max_in_flight`` cases to a
+          thread pool, buffers out-of-order completions by index, and only
+          yields when ``emit_index`` is present in the buffer. This preserves
+          input order without blocking the pool.
+
+        Parameters:
+            cases: Iterable of raw input records.
+            node_name, force, execution_mode: Forwarded to :meth:`run_case`.
+            max_workers: Pool size; 1 disables parallelism.
+            max_in_flight: Submission cap. Defaults via
+                :meth:`_normalize_max_in_flight` to ``2 × workers``.
+            continue_on_error: If ``False``, stops submitting after the first
+                failure and cancels remaining pending futures once that
+                failure has been emitted. Already-buffered earlier results
+                still get yielded so output ordering stays contiguous up to
+                the failure point.
+
+        Yields:
+            :class:`CaseRunOutcome` — one per case, strictly increasing
+            ``index``.
+        """
         workers = max(1, max_workers)
         in_flight_limit = self._normalize_max_in_flight(
             max_workers=workers,
@@ -520,6 +760,7 @@ class CachedNodeRunner:
                         node_name=node_name,
                         force=force,
                         execution_mode=execution_mode,
+                        debug=debug,
                     )
                     yield CaseRunOutcome(index=idx, case_id=result.case_id, result=result)
                 except Exception as exc:
@@ -563,6 +804,7 @@ class CachedNodeRunner:
                         node_name=node_name,
                         force=force,
                         execution_mode=execution_mode,
+                        debug=debug,
                     )
                     pending[future] = (idx, case_id)
 

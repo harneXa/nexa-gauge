@@ -92,9 +92,10 @@ def test_graph_forwards_llm_overrides_to_nodes(graph_module, monkeypatch) -> Non
             )
 
     class _FakeGevalStepsNode:
-        def __init__(self, judge_model: str, llm_overrides=None):
+        def __init__(self, judge_model: str, llm_overrides=None, artifact_cache_store=None):
             self.judge_model = judge_model
             self.llm_overrides = llm_overrides
+            self.artifact_cache_store = artifact_cache_store
 
         def run(self, metrics):
             return graph_module.GevalStepsArtifacts(

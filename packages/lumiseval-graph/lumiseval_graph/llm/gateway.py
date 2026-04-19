@@ -71,6 +71,20 @@ class StructuredLLM:
             metadata={"node_name": self.node_name},
         )
 
+    def _call_with_logprobs(
+        self, messages: List[Dict[str, str]], model: str, top_logprobs: int
+    ) -> Any:
+        return litellm.completion(
+            model=model,
+            messages=messages,
+            temperature=self.temperature,
+            response_format=self.schema,
+            logprobs=True,
+            top_logprobs=top_logprobs,
+            timeout=LLM_CALL_TIMEOUT_SECONDS,
+            metadata={"node_name": self.node_name},
+        )
+
     # ── Public API ─────────────────────────────────────────────────────────
 
     def invoke(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
@@ -116,6 +130,61 @@ class StructuredLLM:
             "model": used_model,
         }
 
+    def invoke_with_logprobs(
+        self, messages: List[Dict[str, str]], *, top_logprobs: int = 20
+    ) -> Dict[str, Any]:
+        """Structured call that also returns per-token logprobs.
+
+        Same return shape as :meth:`invoke`, plus a ``logprobs`` key containing a
+        list of ``{token, logprob, top_logprobs: [{token, logprob}, ...]}`` dicts
+        — or ``None`` when the provider can't return logprobs (e.g. Ollama).
+
+        Three-tier fallback:
+          1. primary model with logprobs,
+          2. fallback model with logprobs (covers quota / auth failures),
+          3. primary model *without* logprobs (covers feature-unsupported).
+        """
+        logprobs_supported = True
+        used_model = self.model
+        try:
+            response = self._call_with_logprobs(messages, self.model, top_logprobs)
+        except Exception:
+            try:
+                if not self.fallback_model:
+                    raise
+                response = self._call_with_logprobs(
+                    messages, self.fallback_model, top_logprobs
+                )
+                used_model = self.fallback_model
+            except Exception:
+                response = self._call(messages, self.model)
+                logprobs_supported = False
+
+        choice = response.choices[0]
+        content = choice.message.content
+
+        parsing_error: Optional[Exception] = None
+        parsed = None
+        try:
+            parsed = self.schema.model_validate_json(content)
+        except Exception as exc:
+            parsing_error = exc
+
+        usage = response.usage
+        logprobs_payload = _extract_logprobs(choice) if logprobs_supported else None
+
+        return {
+            "parsed": parsed,
+            "parsing_error": parsing_error,
+            "usage": {
+                "prompt_tokens": usage.prompt_tokens,
+                "completion_tokens": usage.completion_tokens,
+                "total_tokens": usage.total_tokens,
+            },
+            "model": used_model,
+            "logprobs": logprobs_payload,
+        }
+
 
 # ── Public factory ──────────────────────────────────────────────────────────
 
@@ -154,3 +223,35 @@ def get_llm(
             fallback_model=cfg.fallback_model,
         )
     return _cache[key]
+
+
+def _extract_logprobs(choice: Any) -> Optional[List[Dict[str, Any]]]:
+    """Flatten LiteLLM's logprobs object into provider-agnostic dicts.
+
+    Returns ``None`` when the provider didn't return logprobs so downstream
+    scoring can fall back to the raw integer score.
+    """
+    logprobs_obj = getattr(choice, "logprobs", None)
+    if logprobs_obj is None:
+        return None
+    content = getattr(logprobs_obj, "content", None)
+    if not content:
+        return None
+
+    out: List[Dict[str, Any]] = []
+    for tok in content:
+        top = [
+            {
+                "token": getattr(alt, "token", ""),
+                "logprob": getattr(alt, "logprob", 0.0),
+            }
+            for alt in (getattr(tok, "top_logprobs", None) or [])
+        ]
+        out.append(
+            {
+                "token": getattr(tok, "token", ""),
+                "logprob": getattr(tok, "logprob", 0.0),
+                "top_logprobs": top,
+            }
+        )
+    return out

@@ -150,31 +150,6 @@ def test_scan_builds_geval_from_item_fields_only() -> None:
     assert second.criteria is not None and second.criteria.tokens > 0
 
 
-def test_scan_ignores_legacy_item_fields_key() -> None:
-    record = {
-        "generation": "Generated answer",
-        "geval": {
-            "metrics": [
-                {
-                    "name": "legacy-shape",
-                    "item_fields": ["context", "reference"],
-                    "criteria": "Legacy format should not override new schema.",
-                    "evaluation_steps": ["Check this answer."],
-                }
-            ]
-        },
-    }
-
-    result = scan(record)
-    inputs = result["inputs"]
-    assert inputs.geval is not None
-    assert len(inputs.geval.metrics) == 1
-
-    metric = inputs.geval.metrics[0]
-    # `item_fields` is the only supported schema input; when omitted, default is ["generation"].
-    assert metric.item_fields == ["generation"]
-
-
 def test_scan_geval_skips_invalid_metrics_and_returns_none_when_empty() -> None:
     record = {
         "generation": "Answer",

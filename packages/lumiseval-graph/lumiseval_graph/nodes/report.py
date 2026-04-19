@@ -55,7 +55,7 @@ REPORT_VISIBILITY: dict[str, Any] = {
     "geval_steps": {
         "names": "geval_steps.resolved_steps[*].name",
         "steps_source": "geval_steps.resolved_steps[*].steps_source",
-        "evaluation_steps": "geval_steps.resolved_steps[*].evaluation_steps.text",
+        "evaluation_steps": "geval_steps.resolved_steps[*].evaluation_steps[*].text",
         "cost": {
             "cost": "geval_steps.cost.cost",
             "input_tokens": "geval_steps.cost.input_tokens",

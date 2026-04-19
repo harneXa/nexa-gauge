@@ -15,12 +15,16 @@ ExecutionMode = Literal["run", "estimate"]
 
 
 class ClaimVerdict(str, Enum):
+    """Verdict from the grounding/faithfulness judge for a single claim."""
+
     SUPPORTED = "SUPPORTED"
     CONTRADICTED = "CONTRADICTED"
     UNVERIFIABLE = "UNVERIFIABLE"
 
 
 class EvidenceSource(str, Enum):
+    """Where evidence for a claim was retrieved from."""
+
     LOCAL = "local"
     MCP = "mcp"
     WEB = "web"
@@ -28,6 +32,8 @@ class EvidenceSource(str, Enum):
 
 
 class MetricCategory(str, Enum):
+    """High-level grouping used by reports to organise metric results."""
+
     RETRIEVAL = "retrieval"  # was evidence retrieval correct/complete?
     ANSWER = "answer"  # is the answer correct, relevant, and safe?
 
@@ -55,6 +61,12 @@ class GevalConfig(BaseModel):
 
 
 class Item(BaseModel):
+    """Smallest unit of text in the pipeline (a chunk, claim, step, …).
+
+    ``id`` defaults to a short SHA-256 of ``text`` so equal text yields a
+    stable identity across runs without the caller having to mint one.
+    """
+
     id: str = ""
     text: str
     tokens: float
@@ -68,7 +80,11 @@ class Item(BaseModel):
 
 
 class GevalMetricInput(BaseModel):
-    """Input carried by a metric per Item"""
+    """One GEval metric as the scanner emits it onto an ``Inputs`` payload.
+
+    ``evaluation_steps`` may be empty — in that case ``GevalStepsNode``
+    generates them from ``criteria`` and caches by signature.
+    """
 
     name: str
     item_fields: list[GevalItemField] = Field(default_factory=lambda: ["generation"])
@@ -105,6 +121,8 @@ class Redteam(BaseModel):
 
 
 class Chunk(BaseModel):
+    """One span of the generation after chunking, with offsets back to source."""
+
     index: int
     item: Item
     char_start: int
@@ -113,6 +131,8 @@ class Chunk(BaseModel):
 
 
 class Claim(BaseModel):
+    """Atomic factual claim extracted from a chunk; feeds grounding/relevance."""
+
     item: Item
     source_chunk_index: Optional[int] = None
     confidence: float = 1.0
@@ -120,6 +140,8 @@ class Claim(BaseModel):
 
 
 class MetricResult(BaseModel):
+    """One row in a metric node's output — score plus optional per-item detail."""
+
     name: str
     category: MetricCategory
     score: float | None = None
@@ -128,14 +150,25 @@ class MetricResult(BaseModel):
 
 
 class Faithfulness(Claim):
+    """Claim annotated with a faithfulness verdict against retrieved evidence."""
+
     verdict: Literal["ACCEPTED", "REJECTED"]
 
 
 class Relevancy(Claim):
+    """Claim annotated with a relevancy verdict against the question."""
+
     verdict: Literal["ACCEPTED", "REJECTED"]
 
 
 class Inputs(BaseModel):
+    """Per-case input bundle built by the scanner node.
+
+    ``has_*`` flags are derived from content presence in the ``@model_validator``
+    below; node eligibility rules (see ``topology.NodeSpec``) read them to
+    decide whether to run or skip.
+    """
+
     case_id: str
     generation: Item
     question: Optional[Item] = None
@@ -163,6 +196,8 @@ class Inputs(BaseModel):
 
 
 class CostEstimate(BaseModel):
+    """USD cost + token counts attached to every node artifact."""
+
     cost: float
     input_tokens: Optional[float] = None
     output_tokens: Optional[float] = None
@@ -172,16 +207,22 @@ class CostEstimate(BaseModel):
 # NODES Essentials
 #
 class ChunkArtifacts(BaseModel):
+    """Output of the ``chunk`` node: split generation + cost."""
+
     chunks: list[Chunk]
     cost: CostEstimate
 
 
 class ClaimArtifacts(BaseModel):
+    """Output of the ``claims`` / ``dedup`` nodes: extracted claims + cost."""
+
     claims: list[Claim]
     cost: CostEstimate
 
 
 class DedupArtifacts(BaseModel):
+    """Raw dedup output; ``dedup_map`` records source→kept index relations."""
+
     items: list[Item]
     dropped: int
     dedup_map: dict[int, int]
@@ -189,22 +230,34 @@ class DedupArtifacts(BaseModel):
 
 
 class GroundingMetrics(BaseModel):
+    """Output of the ``grounding`` metric node."""
+
     metrics: list[MetricResult]
     cost: CostEstimate
 
 
 class RelevanceMetrics(BaseModel):
+    """Output of the ``relevance`` metric node."""
+
     metrics: list[MetricResult]
     cost: CostEstimate
 
 
 class RedteamMetrics(BaseModel):
+    """Output of the ``redteam`` metric node."""
+
     metrics: list[MetricResult]
     cost: CostEstimate
 
 
 class GevalStepsResolved(BaseModel):
-    """This is per metric per Item."""
+    """Resolved evaluation steps for one GEval metric on one case.
+
+    ``steps_source`` tells reports whether the steps were provided by the
+    caller, freshly generated, or served from the artifact cache.
+    ``signature`` is populated whenever the steps came from (or were written
+    into) the cache.
+    """
 
     key: str
     name: str
@@ -215,21 +268,47 @@ class GevalStepsResolved(BaseModel):
 
 
 class GevalStepsArtifacts(BaseModel):
+    """Output of the ``geval_steps`` node: one resolved entry per metric."""
+
     resolved_steps: list[GevalStepsResolved] = Field(default_factory=list)
     cost: CostEstimate | None = None
 
 
+class GevalCacheArtifact(BaseModel):
+    """Persisted artifact for one GEval-step signature.
+
+    Cached independently of per-case state: keyed on
+    (model, prompt_version, parser_version, item_fields, criteria) so N cases
+    sharing a criterion reuse one LLM call.
+    """
+
+    signature: str
+    model: str
+    prompt_version: str
+    parser_version: str
+    item_fields: list[str]
+    criteria: Item
+    evaluation_steps: list[Item]
+    created_at: str
+
+
 class GevalMetrics(BaseModel):
+    """Output of the ``geval`` metric node."""
+
     metrics: list[MetricResult] = Field(default_factory=list)
     cost: CostEstimate | None = None
 
 
 class ReferenceMetrics(BaseModel):
+    """Output of the ``reference`` metric node."""
+
     metrics: list[MetricResult]
     cost: CostEstimate
 
 
 class EvalPayload(BaseModel):
+    """Output of the ``eval`` join node: flattened metrics + aggregate cost."""
+
     metrics: list[MetricResult]
     cost: CostEstimate
 
