@@ -3,14 +3,14 @@ requires = ["hatchling>=1.25.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "lumis-eval"
+name = "nexa-gauge"
 version = "0.1.0"
 description = "Agentic LLM evaluation pipeline with cache-aware graph execution"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [
-    { name = "LumisEval Contributors" },
+    { name = "NexaGauge Contributors" },
 ]
 keywords = [
     "llm",
@@ -56,20 +56,20 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Sardhendu/lumis-eval"
-Repository = "https://github.com/Sardhendu/lumis-eval"
-Issues = "https://github.com/Sardhendu/lumis-eval/issues"
-Documentation = "https://github.com/Sardhendu/lumis-eval/tree/main/docs"
-Security = "https://github.com/Sardhendu/lumis-eval/security/policy"
+Homepage = "https://github.com/Sardhendu/nexa-gauge"
+Repository = "https://github.com/Sardhendu/nexa-gauge"
+Issues = "https://github.com/Sardhendu/nexa-gauge/issues"
+Documentation = "https://github.com/Sardhendu/nexa-gauge/tree/main/docs"
+Security = "https://github.com/Sardhendu/nexa-gauge/security/policy"
 
 [project.scripts]
-lumiseval = "lumiseval_api.main:main"
+nexagauge = "ng_api.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = [
-    "apps/lumiseval-api/lumiseval_api",
-    "packages/lumiseval-core/lumiseval_core",
-    "packages/lumiseval-graph/lumiseval_graph",
+    "apps/nexagauge-api/ng_api",
+    "packages/nexagauge-core/ng_core",
+    "packages/nexagauge-graph/ng_graph",
 ]
 
 [tool.hatch.build.targets.sdist]
@@ -120,6 +120,6 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = [
-    "packages/lumiseval-core/test_lumiseval_core",
-    "packages/lumiseval-graph/test_lumiseval_graph",
+    "packages/nexagauge-core/test_ng_core",
+    "packages/nexagauge-graph/test_ng_graph",
 ]

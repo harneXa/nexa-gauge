@@ -1,13 +1,13 @@
-# LumisEval Architecture
+# NexaGauge Architecture
 
 This document reflects the current implementation in:
-- `apps/lumiseval-cli`
-- `packages/lumiseval-core`
-- `packages/lumiseval-graph`
+- `apps/nexagauge-cli`
+- `packages/nexagauge-core`
+- `packages/nexagauge-graph`
 
 ## 1) System Overview
 
-LumisEval is a CLI-first evaluation system that executes a typed graph pipeline over dataset rows.
+NexaGauge is a CLI-first evaluation system that executes a typed graph pipeline over dataset rows.
 
 ```mermaid
 flowchart LR
@@ -32,23 +32,23 @@ flowchart LR
 
 ## 2) Main Subsystems
 
-### CLI (`apps/lumiseval-cli`)
+### CLI (`apps/nexagauge-cli`)
 - Commands:
-  - `lumiseval run <node_name>`
-  - `lumiseval estimate <node_name>`
+  - `nexagauge run <node_name>`
+  - `nexagauge estimate <node_name>`
 - Data source adapters:
   - Local file adapter (`json`, `jsonl`, `csv`, text fallback)
   - Hugging Face adapter (`hf://...`)
 - Runtime model routing:
   - global and per-node model/fallback override handling
 
-### Core (`packages/lumiseval-core`)
+### Core (`packages/nexagauge-core`)
 - Shared typed contracts (`types.py`)
 - Environment-backed config (`config.py`)
 - Cache backend and key utilities (`cache.py`)
 - Error types (`errors.py`)
 
-### Graph (`packages/lumiseval-graph`)
+### Graph (`packages/nexagauge-graph`)
 - Node topology registry (`topology.py`)
 - Node function registry (`registry.py`)
 - Graph node implementations (`graph.py`, `nodes/*`)

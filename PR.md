@@ -1,29 +1,29 @@
 <!-- pr-snapshot: 0403b0e731cd14dc09cb809d329cb5921af87007 -->
 
-# GEval split, unified cache, and package rename to `lumiseval`
+# GEval split, unified cache, and package rename to `nexagauge`
 
 **Branch:** `geval-split` → `main`
 **Date:** 2026-04-19
 
 ## Summary
 
-Splits the GEval metric node into `geval_steps`, `geval_score`, and `geval_weighted_score`, and consolidates GEval step-artifact caching onto the universal `NodeCacheBackend` so `--no-cache` is respected uniformly. Renames all packages from `lumos*`/`lumoseval*` to `lumiseval*` (CLI app now `lumiseval-api`), overhauls the report node, and expands CI, docs, and test coverage.
+Splits the GEval metric node into `geval_steps`, `geval_score`, and `geval_weighted_score`, and consolidates GEval step-artifact caching onto the universal `NodeCacheBackend` so `--no-cache` is respected uniformly. Renames all packages from `lumos*`/`lumoseval*` to `nexagauge*` (CLI app now `nexagauge-api`), overhauls the report node, and expands CI, docs, and test coverage.
 
 ## What Changed
 
-### Core (`lumiseval-core`)
+### Core (`nexagauge-core`)
 - Extends `cache.py` with a comprehensive module docstring covering per-node and GEval-artifact key schemes, storage layout, deserialisation, and extension points; adds `"geval_artifact": GevalCacheArtifact` to `_FIELD_TYPE_MAP`.
 - Adds `GevalCacheArtifact` and redteam/geval typed input models to `types.py`, with concise docstrings on every Pydantic model and enum.
 - Deletes the stale v1 `geval_cache.py` and its test — functionality now subsumed by the universal cache.
 
-### Graph (`lumiseval-graph`)
+### Graph (`nexagauge-graph`)
 - Splits GEval: `geval_steps.py` now owns step generation + cache lookup via `NodeCacheBackend`; `score.py` is a pure per-metric scorer; new `weighted_score.py` aggregates across metrics.
 - `nodes/metrics/geval/cache.py` shrinks to pure helpers (`compute_geval_signature`, `collect_geval_signatures`, `build_geval_artifact_cache_key`, version constants). The `GevalArtifactCache` class is gone.
 - Runner stashes `self._cache` into `state["__cache_store"]` so `GevalStepsNode` picks up the same backend (including `NoOpCacheStore` under `--no-cache`).
 - Report node (`nodes/report.py`) restructured for richer aggregate and per-case projections.
 - Gateway, graph wiring, topology, and registry updated to match the new node boundaries.
 
-### CLI app rename (`apps/lumiseval-cli` → `apps/lumiseval-api`)
+### CLI app rename (`apps/nexagauge-cli` → `apps/nexagauge-api`)
 - Directory rename plus entry-point, import, and test-path updates.
 - CLI `run` / `estimate` / `util` refactored around the split graph and new cache plumbing.
 
@@ -49,13 +49,13 @@ Splits the GEval metric node into `geval_steps`, `geval_score`, and `geval_weigh
 ## Test Plan
 
 - [ ] `uv run pytest packages/ apps/ -q` — full suite.
-- [ ] `uv run pytest packages/lumiseval-graph/test_lumiseval_graph/test_nodes/test_metrics/test_geval/ -v` — GEval-focused.
+- [ ] `uv run pytest packages/nexagauge-graph/test_ng_graph/test_nodes/test_metrics/test_geval/ -v` — GEval-focused.
 - [ ] Smoke (no-cache leak regression):
   - `rm -rf ./data/geval_steps`
-  - `uv run lumiseval run geval_steps --input sample.json --output-dir ./data/geval_steps --no-cache`
+  - `uv run nexagauge run geval_steps --input sample.json --output-dir ./data/geval_steps --no-cache`
   - Confirm every output `steps_source` is `"generated"` or `"provided"`; zero `"cache_used"`.
 - [ ] Smoke (cross-case reuse retained): rerun without `--no-cache` twice; second run shows `"cache_used"` for shared criteria.
-- [ ] `grep -R "GevalArtifactCache\|lumiseval_core.geval_cache\|lumos_\|lumoseval_" packages/ apps/` — zero hits.
+- [ ] `grep -R "GevalArtifactCache\|ng_core.geval_cache\|lumos_\|lumoseval_" packages/ apps/` — zero hits.
 
 ## Notes for Reviewer
 

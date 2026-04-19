@@ -1,10 +1,10 @@
-# Contributing to LumisEval
+# Contributing to NexaGauge
 
 ## Development Setup
 
 ```bash
-git clone git@github.com:Sardhendu/lumis-eval.git
-cd lumis-eval
+git clone git@github.com:Sardhendu/nexa-gauge.git
+cd nexa-gauge
 uv sync
 cp .env.example .env
 ```
@@ -27,8 +27,8 @@ make ci
 ## Local Test Targets
 
 ```bash
-uv run pytest -s packages/lumiseval-graph/test_lumiseval_graph
-uv run pytest -s apps/lumiseval-cli/test_lumiseval_cli
+uv run pytest -s packages/nexagauge-graph/test_ng_graph
+uv run pytest -s apps/nexagauge-cli/test_ng_cli
 ```
 
 ## Reporting Bugs / Requesting Features

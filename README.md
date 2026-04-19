@@ -1,16 +1,16 @@
 <p align="center">
-  <img src="lumiseval-banner.svg" alt="Lumis Eval" width="760" />
+  <img src="nexagauge-banner.svg" alt="Nexa Gauge" width="760" />
 </p>
 
-# LumisEval
+# NexaGauge
 
-[![CI](https://img.shields.io/github/actions/workflow/status/Sardhendu/lumis-eval/ci.yml?branch=main&label=CI)](https://github.com/Sardhendu/lumis-eval/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/Sardhendu/nexa-gauge/ci.yml?branch=main&label=CI)](https://github.com/Sardhendu/nexa-gauge/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
 
 Agentic LLM evaluation pipeline with cache-aware graph execution, branch-level cost estimation, and declarative reporting.
 
-## Why LumisEval
+## Why NexaGauge
 
 - Graph-based evaluation nodes (`scan -> chunk -> claims -> metrics -> eval -> report`)
 - Per-node cache reuse across runs and estimates
@@ -23,21 +23,21 @@ Agentic LLM evaluation pipeline with cache-aware graph execution, branch-level c
 ### Option 1: from local source (recommended for development)
 
 ```bash
-git clone git@github.com:Sardhendu/lumis-eval.git
-cd lumis-eval
+git clone git@github.com:Sardhendu/nexa-gauge.git
+cd nexa-gauge
 pip install -e .
 ```
 
 ### Option 2: from GitHub
 
 ```bash
-pip install "git+https://github.com/Sardhendu/lumis-eval.git"
+pip install "git+https://github.com/Sardhendu/nexa-gauge.git"
 ```
 
 ### Option 3: from PyPI (after publish)
 
 ```bash
-pip install lumis-eval
+pip install nexa-gauge
 ```
 
 ## Quick Start
@@ -46,9 +46,9 @@ pip install lumis-eval
 cp .env.example .env
 # set OPENAI_API_KEY in .env
 
-lumiseval --help
-lumiseval estimate grounding --input sample.json --limit 5
-lumiseval run eval --input sample.json --limit 5 --output-dir ./report
+nexagauge --help
+nexagauge estimate grounding --input sample.json --limit 5
+nexagauge run eval --input sample.json --limit 5 --output-dir ./report
 ```
 
 ## CLI Commands
@@ -56,13 +56,13 @@ lumiseval run eval --input sample.json --limit 5 --output-dir ./report
 ### Estimate uncached branch cost
 
 ```bash
-lumiseval estimate <target_node> --input <source> [options]
+nexagauge estimate <target_node> --input <source> [options]
 ```
 
 ### Execute a branch
 
 ```bash
-lumiseval run <target_node> --input <source> [options]
+nexagauge run <target_node> --input <source> [options]
 ```
 
 Most used options:
@@ -96,7 +96,7 @@ Dependency highlights:
 
 ## Report Contract
 
-Report is built by `lumiseval_graph.nodes.report.aggregate` using `REPORT_VISIBILITY`.
+Report is built by `ng_graph.nodes.report.aggregate` using `REPORT_VISIBILITY`.
 
 Always present keys:
 - `target_node`
@@ -137,16 +137,16 @@ uv build
 ```
 
 You should get:
-- `dist/lumis_eval-<version>-py3-none-any.whl`
-- `dist/lumis_eval-<version>.tar.gz`
+- `dist/nexa_gauge-<version>-py3-none-any.whl`
+- `dist/nexa_gauge-<version>.tar.gz`
 
 Basic wheel smoke test:
 
 ```bash
-python -m venv /tmp/lumiseval-venv
-source /tmp/lumiseval-venv/bin/activate
+python -m venv /tmp/nexagauge-venv
+source /tmp/nexagauge-venv/bin/activate
 pip install dist/*.whl
-lumiseval --help
+nexagauge --help
 ```
 
 ## Project Standards

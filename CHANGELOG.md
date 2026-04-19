@@ -8,7 +8,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ## [Unreleased]
 
 ### Added
-- Root package metadata and wheel/sdist build configuration for `lumis-eval`.
+- Root package metadata and wheel/sdist build configuration for `nexa-gauge`.
 - Top-level governance files: `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`.
 - Publish workflow for tagged PyPI releases.
 - Dependabot config for dependency and GitHub Actions updates.

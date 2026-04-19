@@ -1,6 +1,6 @@
 # Execution Model
 
-This document describes how execution works today in `packages/lumiseval-graph/lumiseval_graph/runner.py`.
+This document describes how execution works today in `packages/nexagauge-graph/ng_graph/runner.py`.
 
 ## 1) Core Executor
 
@@ -46,7 +46,7 @@ This means model-routing changes invalidate cache for affected nodes.
 
 ## 5) Cache Read/Write Policy
 
-Policy in `lumiseval_core/cache.py`:
+Policy in `ng_core/cache.py`:
 - reads allowed in both `run` and `estimate`
 - writes allowed in `run`
 - estimate writes are disabled by default

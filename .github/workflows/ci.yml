@@ -46,7 +46,7 @@ jobs:
 
       - name: Wheel smoke test
         run: |
-          python -m venv /tmp/lumiseval-wheel-test
-          source /tmp/lumiseval-wheel-test/bin/activate
+          python -m venv /tmp/nexagauge-wheel-test
+          source /tmp/nexagauge-wheel-test/bin/activate
           pip install dist/*.whl
-          lumiseval --help
+          nexagauge --help

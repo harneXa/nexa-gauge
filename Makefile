@@ -2,7 +2,7 @@
 .PHONY: help install sync lint lint-fix format typecheck test test-verbose test-pkg test_graph ci clean clean-venv api
 
 # ── Variables ──────────────────────────────────────────────────────────────
-PROJECT_NAME := lumis-eval
+PROJECT_NAME := nexa-gauge
 PYTHON       := uv run python
 
 # ── Help ───────────────────────────────────────────────────────────────────
@@ -38,11 +38,11 @@ test: ## Run all tests
 test-verbose: ## Run all tests with verbose output
 	uv run pytest -v
 
-test-pkg: ## Run tests for a specific package. Usage: make test-pkg PKG=packages/lumiseval-core
+test-pkg: ## Run tests for a specific package. Usage: make test-pkg PKG=packages/nexagauge-core
 	uv run pytest $(PKG)
 
-test_graph: ## Run lumiseval-graph tests with output
-	uv run pytest -s packages/lumiseval-graph/test_lumiseval_graph
+test_graph: ## Run nexagauge-graph tests with output
+	uv run pytest -s packages/nexagauge-graph/test_ng_graph
 
 # ── CI ─────────────────────────────────────────────────────────────────────
 ci: ## Run full CI pipeline locally (format check → lint → test)
@@ -56,7 +56,7 @@ ci: ## Run full CI pipeline locally (format check → lint → test)
 
 # ── Deprecated targets ─────────────────────────────────────────────────────
 api: ## Deprecated (API package removed)
-	@echo "The API package was removed. Use CLI commands instead (e.g. 'lumiseval --help')."
+	@echo "The API package was removed. Use CLI commands instead (e.g. 'nexagauge --help')."
 
 # ── Clean ──────────────────────────────────────────────────────────────────
 clean: ## Remove build artifacts and caches

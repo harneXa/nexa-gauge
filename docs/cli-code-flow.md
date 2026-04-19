@@ -1,14 +1,14 @@
 # CLI Code Flow
 
 This document describes the actual command flow for:
-- `lumiseval run <node_name>`
-- `lumiseval estimate <node_name>`
+- `nexagauge run <node_name>`
+- `nexagauge estimate <node_name>`
 
 Source files:
-- `apps/lumiseval-cli/lumiseval_cli/main.py`
-- `apps/lumiseval-cli/lumiseval_cli/cli/run.py`
-- `apps/lumiseval-cli/lumiseval_cli/cli/estimate.py`
-- `apps/lumiseval-cli/lumiseval_cli/cli/util.py`
+- `apps/nexagauge-cli/ng_cli/main.py`
+- `apps/nexagauge-cli/ng_cli/cli/run.py`
+- `apps/nexagauge-cli/ng_cli/cli/estimate.py`
+- `apps/nexagauge-cli/ng_cli/cli/util.py`
 
 ## 1) Command Entry
 
@@ -17,7 +17,7 @@ Source files:
 - `estimate`
 
 ```text
-lumiseval
+nexagauge
   ├── run <node_name> ...
   └── estimate <node_name> ...
 ```
@@ -45,7 +45,7 @@ Both commands execute this setup sequence:
    - apply `start/end/limit` slicing
    - inject per-case `llm_overrides`
 
-## 3) `lumiseval run` Flow
+## 3) `nexagauge run` Flow
 
 File: `cli/run.py`
 
@@ -72,7 +72,7 @@ Practical implication:
 - Targets like `grounding`, `relevance`, `redteam`, `geval`, `reference`, and `eval` usually produce `report`.
 - Intermediate targets like `scan`, `chunk`, `claims`, `dedup` typically do not.
 
-## 4) `lumiseval estimate` Flow
+## 4) `nexagauge estimate` Flow
 
 File: `cli/estimate.py`
 

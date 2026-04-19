@@ -1,4 +1,4 @@
-# Get Started with LumisEval
+# Get Started with NexaGauge
 
 ## Prerequisites
 
@@ -27,7 +27,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 ### Step 2: Create Virtual Environment
 
 ```bash
-cd lumis-eval
+cd nexa-gauge
 uv venv .venv
 ```
 
@@ -76,7 +76,7 @@ uv add datasets
 If you already have a `uv.lock` file in the repository:
 
 ```bash
-cd lumis-eval
+cd nexa-gauge
 uv venv .venv
 source .venv/bin/activate      # macOS/Linux
 # .venv\Scripts\activate       # Windows PowerShell
@@ -94,9 +94,9 @@ The `uv sync` command will use the existing lock file for reproducible, determin
 Test that everything is installed correctly:
 
 ```bash
-uv run lumiseval --help
-uv run lumiseval run --help
-uv run lumiseval estimate --help
+uv run nexagauge --help
+uv run nexagauge run --help
+uv run nexagauge estimate --help
 ```
 
 You should see help output for each command.
@@ -105,7 +105,7 @@ You should see help output for each command.
 
 ## 4) Input Record Format
 
-LumisEval accepts JSON input with various field formats.
+NexaGauge accepts JSON input with various field formats.
 
 ### Minimal Record
 
@@ -206,7 +206,7 @@ scan → {
 Estimate token cost and pricing without executing LLM calls:
 
 ```bash
-uv run lumiseval estimate grounding --input sample.json --limit 10
+uv run nexagauge estimate grounding --input sample.json --limit 10
 ```
 
 Useful for budget planning before running the full evaluation.
@@ -216,7 +216,7 @@ Useful for budget planning before running the full evaluation.
 Execute a branch up to a target node:
 
 ```bash
-uv run lumiseval run grounding --input sample.json --limit 10
+uv run nexagauge run grounding --input sample.json --limit 10
 ```
 
 ### Run with Error Handling
@@ -224,7 +224,7 @@ uv run lumiseval run grounding --input sample.json --limit 10
 Continue processing even if some records fail:
 
 ```bash
-uv run lumiseval run grounding --input sample.json --limit 10 --continue-on-error
+uv run nexagauge run grounding --input sample.json --limit 10 --continue-on-error
 ```
 
 ### Run Full Evaluation and Save Reports
@@ -232,7 +232,7 @@ uv run lumiseval run grounding --input sample.json --limit 10 --continue-on-erro
 Execute all branches and generate report files:
 
 ```bash
-uv run lumiseval run eval --input sample.json --output-dir ./report --limit 10
+uv run nexagauge run eval --input sample.json --output-dir ./report --limit 10
 ```
 
 Reports are saved as JSON in `./report/`.
@@ -241,12 +241,12 @@ Reports are saved as JSON in `./report/`.
 
 **Local JSON file (default):**
 ```bash
-uv run lumiseval run eval --input sample.json
+uv run nexagauge run eval --input sample.json
 ```
 
 **Hugging Face dataset:**
 ```bash
-uv run lumiseval estimate relevance \
+uv run nexagauge estimate relevance \
   --input hf://openai/gsm8k \
   --adapter huggingface \
   --hf-config main \
@@ -263,7 +263,7 @@ uv run lumiseval estimate relevance \
 Use a specific model for all nodes:
 
 ```bash
-uv run lumiseval run grounding --input sample.json --model openai/gpt-4o-mini
+uv run nexagauge run grounding --input sample.json --model openai/gpt-4o-mini
 ```
 
 ### Per-Node Model Routing
@@ -271,7 +271,7 @@ uv run lumiseval run grounding --input sample.json --model openai/gpt-4o-mini
 Override primary and fallback models for specific nodes:
 
 ```bash
-uv run lumiseval run grounding \
+uv run nexagauge run grounding \
   --input sample.json \
   --llm-model grounding=openai/gpt-4o \
   --llm-fallback grounding=openai/gpt-4o-mini
@@ -289,7 +289,7 @@ Both `--llm-model` and `--llm-fallback` are repeatable for multiple nodes.
 
 ## 8) Cache Management
 
-LumisEval caches LLM responses and intermediate results in `.lumiseval_cache/` by default.
+NexaGauge caches LLM responses and intermediate results in `.nexagauge/` by default.
 
 ### Cache Flags
 
@@ -299,7 +299,7 @@ LumisEval caches LLM responses and intermediate results in `.lumiseval_cache/` b
 
 **Example:**
 ```bash
-uv run lumiseval run grounding --input sample.json --force
+uv run nexagauge run grounding --input sample.json --force
 ```
 
 ### Estimate Mode Cache
