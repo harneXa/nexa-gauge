@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import lumiseval_graph.nodes.metrics.geval.steps as steps_module
 import pytest
 from lumiseval_core.cache import CacheStore, NoOpCacheStore
-from lumiseval_core.types import GevalMetricInput, GevalCacheArtifact, Item
+from lumiseval_core.types import GevalCacheArtifact, GevalMetricInput, Item
 from lumiseval_graph.nodes.metrics.geval.cache import (
     build_geval_artifact_cache_key,
     compute_geval_signature,

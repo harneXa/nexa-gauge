@@ -31,7 +31,8 @@ from pydantic import BaseModel
 from lumiseval_graph.llm.config import get_node_config
 from lumiseval_graph.log import get_node_logger
 from lumiseval_graph.registry import NODE_FNS
-from lumiseval_graph.topology import METRIC_NODES, NODES_BY_NAME, DEBUG_SKIP_NODES
+from lumiseval_graph.topology import DEBUG_SKIP_NODES, METRIC_NODES, NODES_BY_NAME
+
 
 def _debug_log_running(node_name: str, case_id: str) -> None:
     if node_name in DEBUG_SKIP_NODES:
