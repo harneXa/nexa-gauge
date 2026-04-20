@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "── Setting up lumis-eval ──"
+echo "── Setting up nexa-gauge ──"
 
 # 1. Check uv
 if ! command -v uv &> /dev/null; then
@@ -25,5 +25,5 @@ echo "✓ Or use: uv run <command>"
 echo ""
 echo "Quick start:"
 echo "  cp .env.example .env   # fill in API keys"
-echo "  lumiseval --help       # CLI entry point"
-echo "  make api               # start REST API"
+echo "  nexagauge --help       # CLI entry point"
+echo "  nexagauge run eval --input sample.json --limit 1"

@@ -1,233 +1,113 @@
-# LumisEval Architecture (Current V1 Code)
+# neXa-gauge Architecture
 
-This document reflects the current implementation across:
-- `apps/lumiseval-cli`
-- `apps/lumiseval-api`
-- `packages/lumiseval-graph`
-- `packages/lumiseval-ingest`
-- `packages/lumiseval-evidence`
-- `packages/lumiseval-core`
+neXa-gauge is a CLI-first evaluation engine for LLM outputs. Execution is driven by a typed node topology, a cache-aware runner, and declarative report projection.
 
-Core evaluation intent is split into two top-level quality dimensions:
-- `retrieval_score`: did we retrieve the right evidence safely and sufficiently?
-- `answer_score`: is the generated answer correct, relevant, and safe?
+Source of truth for node dependencies and input gating: `packages/nexagauge-graph/ng_graph/topology.py`.
 
-`composite_score` is currently the simple average of available top-level scores.
+## Runtime Components
 
-## 1) High-Level Architecture
+- `ng_cli` - command entrypoint (`run`, `estimate`), dataset selection, model routing overrides.
+- `adapters` - input ingestion from local files and Hugging Face datasets.
+- `ng_graph.runner` - ordered/parallel execution, node-level caching, streaming outcomes.
+- `ng_graph.graph` + `ng_graph.nodes.*` - node implementations.
+- `ng_graph.nodes.report` - declarative report projection from final state.
 
-```mermaid
-flowchart LR
-  U["User / Benchmark Source"] --> I["Interfaces: CLI, API, SDK"]
-  I --> A["Adapter Layer: create_dataset_adapter()"]
-  A --> C["Canonical Schema: EvalCase"]
+## Top-Down Pipeline Diagram
 
-  C --> CR["CachedNodeRunner (strict target execution)"]
-  C --> NR["NodeRunner (single node correctness tests)"]
-  I --> SG["Single Generation API: run_graph()"]
+- Built from `PIPELINE` in `topology.py`, with a layout close to the original design style.
+- Solid edges show primary graph flow.
+- Dashed edges show gating and extra eval prerequisites.
 
-  CR --> NP["Node plan + cache reuse (per case)"]
-  SG --> G["LangGraph Evaluation Pipeline"]
-  NR --> NO["NodeRunResult: node_output + final_state"]
+Shape key:
 
-  NP --> O["Outputs: CLI node result / JSON report"]
-  G --> R["EvalReport"]
-  R --> O2["Outputs: API response / report"]
+- Circle — utility node (`is_utility`)
+- Rounded rectangle — metric node (`is_metric`)
+- Hexagon — `eval` (the single join every branch funnels through)
+- Stadium — `report` (terminal aggregation)
+- Rectangle — `scan` (preflight)
 
-  subgraph EXT["External Engines & Services"]
-    E2["DeepEval (GEval, BiasMetric, ToxicityMetric)"]
-    E4["LiteLLM Judge Models"]
-    E5["LanceDB + SentenceTransformers"]
-    E6["Tavily Web Search (optional)"]
-  end
-
-  G -.uses.-> E2
-  G -.uses.-> E4
-  G -.uses.-> E5
-  G -.optional.-> E6
-```
-
-## 2) Medium-Level Architecture
-
-### 2.1 Graph Node Flow
+Edge labels encode the target node's `requires_*` input gates. Edges into `eval` are unlabeled because `eval` itself has no input requirements.
 
 ```mermaid
-flowchart TB
-    subgraph CFG["EvalJobConfig toggles"]
-        GRD["🔒 grounding\nfaithfulness per claim"]
-        T1["enable_grounding"]
-        REL["🔄 relevance\nanswer-relevancy"]
-        T2["enable_relevance"]
-        RDT["🛡️ redteam\nbias + toxicity"]
-        T3["enable_redteam"]
-        GVS["🧭 geval_steps\ncriteria -> eval steps"]
-        GVT["🧠 geval\ncustom GEval metrics"]
-        T4["enable_geval"]
-        REF["📚 reference\nROUGE / BLEU / METEOR"]
-        T5["enable_reference"]
-    end
+flowchart TD
+    scan[scan]
 
-    SCAN["🔍 scan\ntokenise · count · eligibility"] --> CHK["📄 chunk\n~100-tok windows"]
-    CHK --> CLM["🧩 claims\nextract atomic claims per chunk"]
-    CLM --> DDP["🔀 dedup\nMMR cosine dedup"]
-    SCAN -- has_generation --> RDT
-    SCAN -- has_geval --> GVS
-    GVS --> GVT
-    SCAN -- has_generation and has reference --> REF
-    DDP -- has_question --> REL
-    DDP -- has_context --> GRD
-    REL --> EVL["⭐ eval\naggregate · score · report"]
-    GRD --> EVL
-    RDT --> EVL
-    GVT --> EVL
-    REF --> EVL
-    EVL --> RPT(["📋 EvalReport"])
-    T1 -. controls .-> GRD
-    T2 -. controls .-> REL
-    T3 -. controls .-> RDT
-    T4 -. controls .-> GVS
-    T4 -. controls .-> GVT
-    T5 -. controls .-> REF
+    %% Utility nodes (circles)
+    chunk((chunk))
+    claims((claims))
+    dedup((dedup))
+    geval_steps((geval_steps))
 
-    GRD:::metric
-    REL:::metric
-    RDT:::metric
-    GVS:::metric
-    GVT:::metric
-    REF:::metric
-    SCAN:::preflight
-    CHK:::ctxpath
-    CLM:::ctxpath
-    DDP:::ctxpath
-    EVL:::agg
-    RPT:::terminal
+    %% Metric nodes (rounded rectangles)
+    relevance(relevance)
+    grounding(grounding)
+    redteam(redteam)
+    geval(geval)
+    reference(reference)
 
-    classDef preflight fill:#1e3a5f,stroke:#4a9eff,color:#fff
-    classDef ctxpath  fill:#1a3a1a,stroke:#4aaf4a,color:#fff
-    classDef metric   fill:#3a1a3a,stroke:#af4aaf,color:#fff
-    classDef agg      fill:#5a4000,stroke:#d4a017,color:#fff
-    classDef terminal fill:#2a2a2a,stroke:#888,color:#fff
+    %% Orchestration
+    eval{{eval}}
+    report([report])
+
+    %% Utility chain
+    scan -- "requires: generation" --> chunk
+    chunk -- "requires: generation" --> claims
+    claims -- "requires: generation" --> dedup
+    scan -- "requires: generation + geval" --> geval_steps
+
+    %% Metric fan-out
+    dedup -- "requires: generation + question" --> relevance
+    dedup -- "requires: generation + context" --> grounding
+    scan -- "requires: generation" --> redteam
+    geval_steps -- "requires: generation + geval" --> geval
+    scan -- "requires: generation + reference" --> reference
+
+    %% Join into eval
+    chunk --> eval
+    claims --> eval
+    dedup --> eval
+    geval_steps --> eval
+    relevance --> eval
+    grounding --> eval
+    redteam --> eval
+    geval --> eval
+    reference --> eval
+
+    %% Terminal
+    eval --> report
+
+    %% Node colors — muted mid-tone palette, hue-matched to NodeSpec.color in topology.py
+    style scan        fill:#7FC7D1,stroke:#3F7A82,color:#fff
+    style chunk       fill:#7FA8D8,stroke:#3F6A9C,color:#fff
+    style claims      fill:#C07AA8,stroke:#7A4469,color:#fff
+    style dedup       fill:#7FBF7F,stroke:#3F8A3F,color:#fff
+    style geval_steps fill:#9FBF9F,stroke:#5F8A5F,color:#fff
+    style relevance   fill:#8FCF7F,stroke:#4F8A3F,color:#fff
+    style grounding   fill:#7FA8D8,stroke:#4F75A8,color:#fff
+    style redteam     fill:#D8847A,stroke:#9A4A42,color:#fff
+    style geval       fill:#A88FBF,stroke:#6F5A8A,color:#fff
+    style reference   fill:#CF7FBF,stroke:#8F4F82,color:#fff
+    style eval        fill:#E0C970,stroke:#A08F3F,color:#3A2F0F
+    style report      fill:#C9A85C,stroke:#8F7A3A,color:#fff
 ```
 
-### 2.2 Evidence Routing Cascade
+## Execution Rules
 
-```mermaid
-flowchart LR
-  C["Claim"] --> L["Local LanceDB Query"]
-  L -->|best score >= threshold| RL["Return LOCAL evidence + verdict"]
-  L -->|best score < threshold| M["MCP LanceDB (stub placeholder)"]
-  M --> W{"web_search enabled and Tavily key available?"}
-  W -->|Yes| T["Tavily Search"]
-  T --> IX["Index web passages into local LanceDB"]
-  IX --> RQ["Re-query local LanceDB"]
-  RQ --> RW["Return WEB evidence + verdict"]
-  W -->|No| RN["Return NONE / UNVERIFIABLE"]
-```
+- Dependencies and requirement labels are derived from `PIPELINE` node specs (direct-parent edges).
+- `eval` aggregates metric branches plus utility prerequisites; `report` depends on `eval`.
+- The eligibility subgraph mirrors `scan`-produced presence flags that gate node execution.
+- At runtime, the CLI runner can append `report` for non-report targets; this diagram focuses on architecture dependency flow.
 
-## 3) Low-Level Function Call Flow
+## Data and Output Contracts
 
-### 3.1 Full Dataset Through CLI Strict Target
+Input normalization (`scan`) maps common aliases into canonical `inputs` fields:
 
-```mermaid
-sequenceDiagram
-  actor User
-  participant CLIE as "CLI estimate()"
-  participant CLI as "CLI run()"
-  participant AD as "create_dataset_adapter()"
-  participant DA as "DatasetAdapter.iter_cases()"
-  participant SC as "scan_cases()"
-  participant PL as "CachedNodeRunner.plan_dataset()"
-  participant ES as "CostEstimator(job_config).estimate()"
-  participant CN as "CachedNodeRunner.run_case()"
-  participant NF as "node function map"
+- `case_id`, `generation`, `question`, `context`, `reference`, `geval`, `redteam`
 
-  User->>CLIE: `lumiseval estimate <target_node> --input ...`
-  CLIE->>AD: resolve local / huggingface adapter
-  AD-->>CLIE: adapter instance
-  CLIE->>DA: iter_cases(split, limit)
-  DA-->>CLIE: EvalCase[]
-  CLIE->>SC: scan selected cases
-  SC-->>CLIE: InputMetadata
-  CLIE->>PL: plan_dataset(cases, target_node)
-  PL-->>CLIE: to_run/cached/skipped by node
-  CLIE->>ES: estimate(delta metadata overrides)
-  ES-->>CLIE: CostReport (rich tables printed)
+Core runtime state includes:
 
-  User->>CLI: `lumiseval run <target_node> --input ...`
-  CLI->>AD: resolve local / huggingface adapter
-  AD-->>CLI: adapter instance
-  CLI->>DA: iter_cases(split, limit)
-  DA-->>CLI: EvalCase[]
+- control: `target_node`, `execution_mode`, `llm_overrides`
+- artifacts: `generation_chunk`, `generation_claims`, `generation_dedup_claims`, `geval_steps`, metric outputs
+- bookkeeping: `estimated_costs`, `node_model_usage`
 
-  loop each EvalCase
-    CLI->>CN: run_case(case, node_name, job_config, force)
-    CN->>NF: execute uncached prereqs + target
-    NF-->>CN: per-node updates
-    CN-->>CLI: CachedNodeRunResult
-  end
-```
-
-### 3.2 Single-Node Correctness Testing Path
-
-```mermaid
-sequenceDiagram
-  actor Dev
-  participant NR as "NodeRunner.run_case()"
-  participant IS as "build_initial_state()"
-  participant NF as "node function map"
-  participant ST as "in-memory EvalState"
-
-  Dev->>NR: run_case(case, node_name, include_prerequisites=True)
-  NR->>IS: create canonical EvalState
-  IS-->>NR: initial state
-  NR->>NR: resolve prerequisites[node_name]
-
-  loop each planned step
-    NR->>NF: call node fn(step)
-    NF-->>NR: updates dict
-    NR->>ST: state.update(updates)
-  end
-
-  NR-->>Dev: NodeRunResult(executed_nodes, node_output, final_state)
-```
-
-## Scoring Model (Current)
-
-- Inputs to eval:
-  - `relevance_metrics`
-  - `grounding_metrics`
-  - `redteam_metrics`
-  - `geval_metrics`
-  - `claim_verdicts` from evidence routing
-- Derived metric:
-  - `evidence_support_rate` = proportion of claims with `SUPPORTED` verdict
-- Partitioning:
-  - Retrieval bucket: metrics with category `RETRIEVAL` + `evidence_support_rate`
-  - Answer bucket: metrics with category `ANSWER`, excluding `vulnerability_*` marker metrics
-- Warnings:
-  - `vulnerability_*` results and metric errors are surfaced as warnings
-- Composite:
-  - `composite_score = avg([retrieval_score, answer_score] where present)`
-
-## Canonical Dataset Contract for V1
-
-All dataset sources are normalized to `EvalCase`:
-- `case_id`
-- `generation` (required)
-- `question` (optional)
-- `reference` (optional)
-- `context` (optional list)
-- `reference_files` (optional list)
-- `geval` (optional object with `metrics[]`)
-- `metadata` (free-form)
-
-This contract is what makes both flows modular:
-- strict-target dataset execution (`CachedNodeRunner` via CLI `run`)
-- isolated node validation (`NodeRunner`)
-
-## Current Gaps (Known in Code)
-
-- MCP retrieval is a stub in `retrieve`.
-- API handlers for `/estimate` and `/run` are documented but not implemented yet.
-- `cost_actual_usd` tracking is not fully wired from real LLM usage yet.
-- Persisted jobs/reports storage is not implemented yet.
+Report shape is controlled by `REPORT_VISIBILITY` and `SECTION_GATES` in `ng_graph.nodes.report`.

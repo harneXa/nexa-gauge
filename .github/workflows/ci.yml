@@ -40,3 +40,13 @@ jobs:
           LLM_MODEL: gpt-4o-mini
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           LANCEDB_PATH: ./.lancedb_ci
+
+      - name: Build package
+        run: uv build
+
+      - name: Wheel smoke test
+        run: |
+          python -m venv /tmp/nexagauge-wheel-test
+          source /tmp/nexagauge-wheel-test/bin/activate
+          pip install dist/*.whl
+          nexagauge --help

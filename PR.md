@@ -1,89 +1,88 @@
-<!-- pr-snapshot: 74d92dcea30baa791334f8aff3eed3c46a9210e6 -->
+<!-- pr-snapshot: b7a9af9f3e213a01aa407baf5c2e7cd9245d815f -->
 
-# PR: Full Refactor — CLI Decomposition, Graph Overhaul, Package Consolidation
-**Branch:** `full-refactor` → `main`
-**Date:** 2026-04-12
+# GEval split, unified cache, and package rename to `nexagauge`
+
+**Branch:** `geval-split` → `main`
+**Date:** 2026-04-19
+Updated: 2026-04-19
 
 ## Summary
 
-Decomposes the CLI monolith into focused submodules, consolidates the package architecture by removing three unused packages (`lumiseval-api`, `lumiseval-ingest`, `lumiseval-evidence`), and substantially rewrites the graph execution layer. Introduces a `CachedNodeRunner` with per-node key-value caching, restructures all metric nodes into typed subpackages (geval, redteam, reference), and adds a `scanner.py` node and `topology.py` for explicit graph topology management. Expands test coverage across all layers with dedicated test suites for every node, metric, and execution path.
+Splits the GEval metric node into `geval_steps`, `geval_score`, and `geval_weighted_score`, and consolidates GEval step-artifact caching onto the universal `NodeCacheBackend` so `--no-cache` is respected uniformly. Renames all packages from `lumos*`/`lumoseval*` to `nexagauge*` (CLI app now `nexagauge-api`), overhauls the report node, and expands CI, docs, and test coverage.
 
 ## What Changed
 
-### CLI (`apps/lumiseval-cli`)
-- Splits the `main.py` monolith (~300 lines) into three dedicated modules: `cli/run.py` (eval execution), `cli/estimate.py` (cost estimation), and `cli/util.py` (shared helpers and defaults)
-- `main.py` is now a thin compatibility shim that re-exports the split commands for backward-compatible programmatic callers
-- Moves dataset adapters (`huggingface.py`, `local_file.py`) directly into the CLI package under `adapters/`, eliminating the dependency on the removed `lumiseval-ingest` package
+### Core (`nexagauge-core`)
+- Extends `cache.py` with a comprehensive module docstring covering per-node and GEval-artifact key schemes, storage layout, deserialisation, and extension points; adds `"geval_artifact": GevalCacheArtifact` to `_FIELD_TYPE_MAP`.
+- Adds `GevalCacheArtifact` and redteam/geval typed input models to `types.py`, with concise docstrings on every Pydantic model and enum.
+- Deletes the stale v1 `geval_cache.py` and its test — functionality now subsumed by the universal cache.
 
-### Graph (`packages/lumiseval-graph`)
-- Renames and significantly extends `node_runner.py` → `runner.py` as `CachedNodeRunner`: per-node cache read/write, concurrent record execution via `ThreadPoolExecutor`, streaming result yields
-- Extracts `topology.py` from `graph.py` to own graph topology definition (`METRIC_NODES`, `NODES_BY_NAME`)
-- Adds `nodes/base.py` as a typed base contract for all node functions
-- Adds `nodes/scanner.py` (~310 lines): document scanning and chunking as an explicit first-stage graph node
-- Adds `nodes/chunk_extractor.py`, `nodes/dedup.py`, `nodes/report.py`
-- Restructures `metrics/geval/` into a full subpackage: `cache.py`, `score.py`, `steps.py` (was a single file)
-- Restructures `metrics/redteam/` into a subpackage: `redteam.py`, `bias.py`, `toxicity.py`
-- Adds `metrics/reference.py` for reference-based scoring
-- Removes `cost_estimator.py`, `eval.py`, `metrics/base.py`, `metrics/rubric.py`, `metrics/token_utils.py`
-- Pins `litellm==1.82.6`; adds `rouge-score`, `nltk`, `semchunk` dependencies; drops `lumiseval-ingest` and `lumiseval-evidence` deps
+### Graph (`nexagauge-graph`)
+- Splits GEval: `geval_steps.py` now owns step generation + cache lookup via `NodeCacheBackend`; `score.py` is a pure per-metric scorer; new `weighted_score.py` aggregates across metrics.
+- `nodes/metrics/geval/cache.py` shrinks to pure helpers (`compute_geval_signature`, `collect_geval_signatures`, `build_geval_artifact_cache_key`, version constants). The `GevalArtifactCache` class is gone.
+- Runner stashes `self._cache` into `state["__cache_store"]` so `GevalStepsNode` picks up the same backend (including `NoOpCacheStore` under `--no-cache`).
+- Report node (`nodes/report.py`) restructured for richer aggregate and per-case projections.
+- Gateway, graph wiring, topology, and registry updated to match the new node boundaries.
 
-### Core (`packages/lumiseval-core`)
-- Significantly extends `cache.py` with `build_node_cache_key`, `cache_read_allowed`, `cache_write_allowed`, `compute_case_hash`
-- Adds `geval_cache.py` for GEval-specific cache logic
-- Adds `utils.py` with shared utilities
-- Refactors `types.py` (field renames and schema updates)
-- Moves `dedup/mmr.py` into core from the removed evidence package
-
-### Removed Packages
-- **`lumiseval-api`**: FastAPI REST server removed (3 files deleted, package deregistered)
-- **`lumiseval-ingest`**: Adapter and scanner logic consolidated into CLI; package deleted
-- **`lumiseval-evidence`**: LanceDB indexer and Tavily router removed; package deleted
-
-### Documentation
-- Major rewrite of `docs/architecture.md` (111 lines changed)
-- New `docs/cli-code-flow.md` (222 lines): documents the CLI command dispatch and adapter flow
-- New `docs/execution-model.md` (56 lines): documents the `CachedNodeRunner` execution model
-- Substantial rewrite of `docs/get-started.md` (~430 lines)
+### CLI app rename (`apps/nexagauge-cli` → `apps/nexagauge-api`)
+- Directory rename plus entry-point, import, and test-path updates.
+- CLI `run` / `estimate` / `util` refactored around the split graph and new cache plumbing.
 
 ### Tests
-- New CLI tests: `test_llm_cli_interface.py`, `test_local_adapter_streaming.py`
-- New core tests: `test_cache.py` (expanded), `test_geval_cache.py`
-- New graph tests covering: end-to-end metric routes, estimate mode, LLM routing, runner streaming, graph overrides, all metric nodes (geval, redteam, grounding, reference, relevance), scanner, chunk extractor, dedup, LLM config and gateway
+- Rewrites `test_cache.py` around the shared backend; adds `test_build_geval_artifact_cache_key_stable`, `test_roundtrip_via_cache_store`, `test_signature_ignores_evaluation_steps`.
+- `test_steps.py` switches fixtures to `CacheStore` / `NoOpCacheStore`; adds `test_no_cache_store_always_generates` and `test_shared_criteria_reuses_generated_steps_across_cases`.
+- New `test_weighted_score.py`, `test_report_aggregate.py`, `test_report_projection.py`.
+- Scanner, end-metric, estimate, runner-streaming, and override tests updated for the renamed packages and new node signatures.
+
+### Docs, CI, config
+- `docs/get-started.md`, `architecture.md`, `cli-code-flow.md`, `execution-model.md` reworked.
+- Adds `.github/workflows/ci.yml`, `publish.yml`, and `dependabot.yml`; adds `CHANGELOG.md`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `SECURITY.md`, `LICENSE`.
+- Root `pyproject.toml`, `Makefile`, `setup.sh`, `sample.json` updated for the rename.
 
 ## Why These Changes
 
-- Splitting the CLI monolith reduces cognitive load when extending or testing individual commands — `run`, `estimate`, and shared utilities are now independently readable and testable
-- Consolidating `lumiseval-ingest` adapters into the CLI eliminates an unnecessary abstraction layer that had no callers outside of the CLI
-- Removing `lumiseval-evidence` and `lumiseval-api` cuts dead weight: the LanceDB indexer and FastAPI server had no active integration points in the current execution model
-- Extracting `topology.py` decouples graph shape from graph execution, making it straightforward to add or remove nodes without touching the runner
-- The `CachedNodeRunner` replaces the previous stateless runner with per-node caching, enabling incremental re-evaluation without re-running the full pipeline on every call
-- Restructuring metrics into subpackages (geval, redteam) reflects their growing complexity and makes individual metric logic navigable
+- The prior monolithic `geval` node coupled step generation, scoring, and aggregation, which blocked caching step artifacts independently of per-case state and forced O(cases) LLM calls even when criteria were shared.
+- Three overlapping caches (universal, GEval artifact, stale v1) meant `--no-cache` silently leaked cache hits for GEval steps. Unifying on `NodeCacheBackend` gives one policy switch, one disk layout, one serialisation path.
+- Keying the GEval artifact by `(model, prompt_version, parser_version, item_fields, criteria)` — never by case or by caller-supplied `evaluation_steps` — preserves cross-case reuse so N cases sharing a criterion pay for one LLM call.
+- Splitting GEval into `steps` / `score` / `weighted_score` aligns with the rest of the node graph's single-responsibility shape and makes the per-metric cache fingerprint tractable.
+- The `lumos*` / `lumoseval*` package names were inconsistent with the product; renaming now, before external consumers arrive, avoids a harder migration later.
 
 ## Test Plan
 
-- [ ] Run test suite: `make test`
-- [ ] Run graph-specific tests with output: `make test_graph`
-- [ ] Manual: run `uv run lumiseval run --help` and confirm CLI commands are intact
-- [ ] Manual: run `uv run lumiseval estimate --help` and confirm estimate command is intact
-- [ ] Manual: execute a sample eval run using `sample.json` to confirm the full pipeline executes end-to-end
+- [ ] `uv run pytest packages/ apps/ -q` — full suite.
+- [ ] `uv run pytest packages/nexagauge-graph/test_ng_graph/test_nodes/test_metrics/test_geval/ -v` — GEval-focused.
+- [ ] Smoke (no-cache leak regression):
+  - `rm -rf ./data/geval_steps`
+  - `uv run nexagauge run geval_steps --input sample.json --output-dir ./data/geval_steps --no-cache`
+  - Confirm every output `steps_source` is `"generated"` or `"provided"`; zero `"cache_used"`.
+- [ ] Smoke (cross-case reuse retained): rerun without `--no-cache` twice; second run shows `"cache_used"` for shared criteria.
+- [ ] `grep -R "GevalArtifactCache\|ng_core.geval_cache\|lumos_\|lumoseval_" packages/ apps/` — zero hits.
 
-**Test files added/modified:**
-- `test_lumiseval_cli/test_llm_cli_interface.py` — CLI run/estimate command integration
-- `test_lumiseval_cli/test_local_adapter_streaming.py` — local file adapter streaming behavior
-- `test_lumiseval_core/test_cache.py` — expanded node cache key and write-guard logic
-- `test_lumiseval_core/test_geval_cache.py` — GEval cache round-trips
-- `test_lumiseval_graph/test_graph/test_runner_streaming.py` — `CachedNodeRunner` streaming and concurrency
-- `test_lumiseval_graph/test_graph/test_estimate_mode.py` — cost estimation path
-- `test_lumiseval_graph/test_graph/test_end_metric_routes.py` — full graph route coverage
-- `test_lumiseval_graph/test_graph/test_llm_routing.py` — LLM gateway routing
-- `test_lumiseval_graph/test_graph/test_run_graph_overrides.py` — user LLM overrides
-- `test_lumiseval_graph/test_nodes/` — per-node tests (scanner, chunk extractor, dedup, all metric nodes)
+---
+### Updates since snapshot 0403b0e (2026-04-19)
+
+**New Changes:**
+- **Topology registry:** Introduces `packages/nexagauge-graph/ng_graph/topology.py` — a frozen `NodeSpec` / `PIPELINE` single source of truth for node ordering, direct-prerequisite edges, eligibility flags, colors, env-key suffixes, and skip-output shapes; adds `transitive_prerequisites()` helper. Node wiring now declares only *direct* parents; transitive ancestors are derived.
+- **Apps layout:** Consolidates `apps/lumiseval-cli` and adapters under a single `apps/nexagauge-apps/` package. Splits surfaces into `ng_cli/` (existing CLI) and a new `ng_api/` FastAPI entry point (`ng_api/main.py`). CLI app rename in the prior snapshot is now **`nexagauge-apps`** (not `nexagauge-api`) — the earlier name was inaccurate.
+- **Docs rewrite:** Rewrites `docs/get-started.md`, `docs/architecture.md`, `docs/cli-code-flow.md`; adds `docs/PRODUCT_SUMMARY.md`; removes `docs/execution-model.md` and root `nodes.md` (content folded into architecture + topology docstrings).
+- **Branding:** Adds `nexagauge-banner.svg`; updates README and legacy `lumiseval-banner.svg` references.
+- **Test reorganization:** Moves tests into package-scoped dirs (`test_apps/test_adapters`, `test_apps/test_ng_cli`, `test_ng_core`, `test_ng_graph`); removes the stale `packages/lumiseval-graph/test_lumiseval_graph/__init__.py` residue.
+- **Residual rename cleanup:** Module-level imports, pyproject entry points, Makefile targets, `setup.sh`, and `.env.example` all settled onto the `nexagauge` / `ng_*` names. Grep for `lumos_` / `lumoseval_` is clean.
+
+**Reason:**
+- Prior snapshot still had the CLI app advertised as `nexagauge-api` and left node wiring implicit in `graph.py`; centralising topology removes a class of drift bugs where ordering, colors, and eligibility flags lived in three files.
+- Adding `ng_api` alongside `ng_cli` under one app package preserves a single install surface while leaving room for the upcoming HTTP entry point without another rename.
+- Docs had diverged from the renamed modules and split node boundaries; the rewrite aligns them with the shipped code before review.
+
+**New Tests:**
+- No new test files in this delta; existing suites were updated only for the package move (`test_apps/`, `test_ng_core/`, `test_ng_graph/` roots).
+---
 
 ## Notes for Reviewer
 
-Three full packages were deleted intentionally:
-- **`lumiseval-api`** (`apps/lumiseval-api/`): The FastAPI server was a stub and had no callers. The `Makefile` still has an `api:` target pointing to it — this should be removed in a follow-up or the API resurrected as a proper package.
-- **`lumiseval-ingest`** (`packages/lumiseval-ingest/`): All active adapter logic has been moved into `lumiseval-cli/adapters/`. The package's test files (`test_dataset_adapters.py`, `test_scanner.py`) are deleted alongside it.
-- **`lumiseval-evidence`** (`packages/lumiseval-evidence/`): The LanceDB + Tavily integration was not wired into the main execution path. If external document retrieval is added back, it should be a fresh design.
-
-The root `pyproject.toml` no longer references `lumiseval-ingest` or `lumiseval-evidence` as workspace members — confirm the workspace `members = ["packages/*", "apps/*"]` glob is still correct given the deletions.
+- On-disk `{cache_dir}/geval_artifacts/*.json` from the old `GevalArtifactCache` layout become unreachable; no automatic migration. Recommend `rm -rf $LUMISEVAL_CACHE_DIR/geval_artifacts` after upgrade.
+- `state["__cache_store"]` uses an under-dunder key deliberately — it is a runner-to-node internal channel, not user data, and `_merge_state_patch` does not touch it.
+- `NON_CACHEABLE_NODES = {"eval", "report"}` and the GEval artifact key prefix `v2:geval_artifact:` are the two extension points most likely to matter for future caching work; both are documented in `cache.py`'s new module docstring.
+- The stale `PR.md` that previously lived on this branch was from the already-merged `full-refactor` PR and has been regenerated from scratch for `geval-split`.
+- `topology.py` is intentionally located in `nexagauge-graph` but contains no function references, so `nexagauge-core` and `nexagauge-apps` can import it without introducing a circular dependency. Treat this as the extension point for any future metric node.
+- The new `ng_api/main.py` is a placeholder FastAPI entry and is not wired into CI or docs yet — flag in review if we should gate its pyproject entry point behind an extra.

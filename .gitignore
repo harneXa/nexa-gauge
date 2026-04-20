@@ -49,8 +49,12 @@ logs/
 uv.lock
 product-doc.md
 idea.md
-.lumiseval_cache
+.nexagauge
 .mypy_cache
 .ruff_cache
-scripts/*PR.md
+scripts/
 report/*
+notes.md
+PR.md
+.claude
+data/*

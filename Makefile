@@ -1,8 +1,8 @@
 .DEFAULT_GOAL := help
-.PHONY: help install sync lint format typecheck test test-verbose test-pkg test_graph ci clean clean-venv
+.PHONY: help install sync lint lint-fix format typecheck test test-verbose test-pkg test_graph ci clean clean-venv api
 
 # ── Variables ──────────────────────────────────────────────────────────────
-PROJECT_NAME := lumis-eval
+PROJECT_NAME := nexa-gauge
 PYTHON       := uv run python
 
 # ── Help ───────────────────────────────────────────────────────────────────
@@ -19,8 +19,11 @@ sync: ## Sync dependencies from lockfile (no install)
 	uv sync
 
 # ── Code quality ───────────────────────────────────────────────────────────
-lint: ## Run ruff linter
-	uv run ruff check .
+lint: ## Run ruff linter (use FIX=1 to apply fixes)
+	uv run ruff check $(if $(FIX),--fix,) .
+
+lint-fix: ## Run ruff linter and apply safe fixes
+	uv run ruff check --fix .
 
 format: ## Auto-format with ruff
 	uv run ruff format .
@@ -35,11 +38,11 @@ test: ## Run all tests
 test-verbose: ## Run all tests with verbose output
 	uv run pytest -v
 
-test-pkg: ## Run tests for a specific package. Usage: make test-pkg PKG=packages/lumiseval-core
+test-pkg: ## Run tests for a specific package. Usage: make test-pkg PKG=packages/nexagauge-core
 	uv run pytest $(PKG)
 
-test_graph: ## Run lumiseval-graph tests with output
-	uv run pytest -s packages/lumiseval-graph/test_lumiseval_graph
+test_graph: ## Run nexagauge-graph tests with output
+	uv run pytest -s packages/nexagauge-graph/test_ng_graph
 
 # ── CI ─────────────────────────────────────────────────────────────────────
 ci: ## Run full CI pipeline locally (format check → lint → test)
@@ -51,9 +54,9 @@ ci: ## Run full CI pipeline locally (format check → lint → test)
 	uv run pytest
 	@echo "==> CI passed"
 
-# ── Dev servers ────────────────────────────────────────────────────────────
-api: ## Start the FastAPI dev server
-	uv run uvicorn lumiseval_api.main:app --reload --port 8080
+# ── Deprecated targets ─────────────────────────────────────────────────────
+api: ## Deprecated (API package removed)
+	@echo "The API package was removed. Use CLI commands instead (e.g. 'nexagauge --help')."
 
 # ── Clean ──────────────────────────────────────────────────────────────────
 clean: ## Remove build artifacts and caches

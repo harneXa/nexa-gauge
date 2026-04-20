@@ -1,202 +1,133 @@
-# Get Started with LumisEval
+# Get Started with neXa-gauge
 
-LumisEval exposes two CLI interfaces:
+## 1) Install
 
-```bash
-lumiseval estimate <target_node> --input <source> ...
-lumiseval run <target_node> --input <source> ...
-```
+Python 3.10+ is required.
 
-- `estimate` only scans/plans/prices.
-- `run` executes directly (no confirmation gate in graph).
-
-## 1) Prerequisites
-
-- Python `>=3.10`
-- `uv`
-- `OPENAI_API_KEY`
-- Optional: `TAVILY_API_KEY` when using web search
-
-## 2) Setup
+Install from PyPI:
 
 ```bash
-cd lumis-eval
-uv sync
-cp .env.example .env
+pip install nexa-gauge
 ```
 
-Set at least:
+If you plan to use Hugging Face datasets (`hf://...`), install extras:
 
 ```bash
-OPENAI_API_KEY=sk-...
-LLM_MODEL=gpt-4o-mini
-WEB_SEARCH_ENABLED=false
+pip install "nexa-gauge[huggingface]"
 ```
 
-If Hugging Face adapter support is missing:
+## 2) Configure Environment
+
+Set at least one provider key before LLM-backed runs.
+
+macOS/Linux:
 
 ```bash
-uv add datasets
+export OPENAI_API_KEY="<your-key>"
+# optional
+export LLM_MODEL="openai/gpt-4o-mini"
 ```
 
-## 3) Nodes and Topology
+Windows PowerShell:
 
-Canonical target nodes:
+```powershell
+$env:OPENAI_API_KEY="<your-key>"
+# optional
+$env:LLM_MODEL="openai/gpt-4o-mini"
+```
 
+You can also use a local `.env` file; see `.env.example` in this repository.
+
+## 3) Create Input Data
+
+Create a sample dataset:
+
+```json
+[
+  {
+    "case_id": "tower-1",
+    "question": "Where is the Eiffel Tower?",
+    "generation": "The Eiffel Tower is in Paris, France.",
+    "context": ["The Eiffel Tower is a Paris landmark."],
+    "reference": "The Eiffel Tower is in Paris.",
+    "geval": {
+      "metrics": [
+        {
+          "name": "location_accuracy",
+          "item_fields": ["question", "generation"],
+          "criteria": "Answer must state Paris as the location."
+        }
+      ]
+    }
+  }
+]
+```
+
+Save it as `sample.json`.
+
+## 4) Run the CLI
+
+Inspect commands:
+
+```bash
+nexagauge --help
+nexagauge run --help
+nexagauge estimate --help
+```
+
+Estimate before execution:
+
+```bash
+nexagauge estimate grounding --input sample.json --limit 10
+```
+
+Run a branch:
+
+```bash
+nexagauge run grounding --input sample.json --limit 10
+```
+
+Run full evaluation and write report files:
+
+```bash
+nexagauge run eval --input sample.json --output-dir ./report --limit 10
+```
+
+## 5) Target Nodes
+
+Available targets:
 - `scan`
 - `chunk`
 - `claims`
 - `dedup`
 - `geval_steps`
-- `geval`
 - `relevance`
 - `grounding`
 - `redteam`
+- `geval`
 - `reference`
 - `eval`
+- `report`
 
-Strict prerequisite paths:
+Typical paths:
+- `grounding`: `scan -> chunk -> claims -> dedup -> grounding`
+- `relevance`: `scan -> chunk -> claims -> dedup -> relevance`
+- `geval`: `scan -> geval_steps -> geval`
+- `eval`: full branch execution + aggregate evaluation
 
-- `chunk <- scan`
-- `claims <- scan, chunk`
-- `dedup <- scan, chunk, claims`
-- `geval_steps <- scan`
-- `geval <- scan, geval_steps`
-- `relevance <- scan, chunk, claims, dedup`
-- `grounding <- scan, chunk, claims, dedup`
-- `redteam <- scan`
-- `reference <- scan`
-- `eval <- scan + all branches`
+## 6) Common Flags
 
-Examples:
+- data: `--input`, `--adapter`, `--split`, `--start`, `--end`, `--limit`
+- model routing: `--model`, `--llm-model`, `--llm-fallback`
+- cache: `--force`, `--no-cache`, `--cache-dir`
+- execution: `--max-workers`, `--max-in-flight`, `--continue-on-error`
+- output: `--output-dir` (run only)
+- debug: `--debug` (node logs on; progress bar off)
 
-- `lumiseval run redteam ...` runs `scan -> redteam`
-- `lumiseval run relevance ...` runs `scan -> chunk -> claims -> dedup -> relevance`
-- `lumiseval run eval ...` runs full graph branch set
-
-## 4) Input Records
-
-Minimal valid record:
-
-```json
-{
-  "generation": "The Eiffel Tower is in Paris."
-}
-```
-
-Recommended full record:
-
-```json
-{
-  "case_id": "eiffel-1",
-  "question": "Where is the Eiffel Tower?",
-  "generation": "The Eiffel Tower is in Paris, France.",
-  "context": ["The Eiffel Tower is a wrought-iron tower in Paris."],
-  "reference": "The Eiffel Tower is located in Paris.",
-  "geval": {
-    "metrics": [
-      {
-        "name": "location_accuracy",
-        "record_fields": ["question", "generation"],
-        "criteria": "The answer must mention Paris as the location."
-      }
-    ]
-  }
-}
-```
-
-Eligibility by field:
-
-- `generation` required for all nodes
-- `context` required for: `chunk`, `claims`, `dedup`, `relevance`, `grounding`
-- `geval.metrics` required for: `geval_steps`, `geval`
-- `reference` required for: `reference`
-
-GEval contract rules:
-- `geval.metrics[]` must include `name`, `record_fields`, and exactly one of `criteria` or `evaluation_steps`
-- `record_fields` must be from: `question`, `generation`, `reference`, `context`
-- `generation` is auto-included if omitted
-
-## 5) CLI Usage
-
-### 5.1 Estimate only
+## 7) Hugging Face Example
 
 ```bash
-uv run lumiseval estimate grounding \
-  --input sample.json \
-  --limit 10
-```
-
-Output includes:
-
-- scan statistics table
-- node eligibility table
-- execution plan table (`to_run` / `cached` / `skipped`)
-- uncached delta cost table for the selected branch
-
-### 5.2 Execute branch
-
-```bash
-uv run lumiseval run grounding \
-  --input sample.json \
-  --limit 10 \
-  --llm-model grounding=openai/gpt-4o \
-  --llm-fallback grounding=openai/gpt-4o-mini
-```
-
-Behavior:
-
-- directly executes the selected branch
-- no estimate/approval prompt
-- uses cache unless `--force` or `--no-cache`
-
-`--yes` is accepted but deprecated on `run` (no-op).
-
-### 5.3 Full eval run
-
-```bash
-uv run lumiseval run eval \
-  --input sample.json \
-  --limit 10 \
-  --output-dir ./runs/eval
-```
-
-For `eval` runs, `report.cost_estimate` is still populated by runner-level pre-eval estimation.
-
-### 5.5 Per-node LLM routing
-
-`--llm-model` and `--llm-fallback` are repeatable and accept:
-
-- `MODEL` (global default for current branch)
-- `NODE=MODEL` (per-node override)
-
-Examples:
-
-```bash
-# All branch nodes use gpt-4o; grounding node uses gpt-4o-mini
-uv run lumiseval run grounding \
-  --input sample.json \
-  --llm-model openai/gpt-4o \
-  --llm-model grounding=openai/gpt-4o-mini
-```
-
-```bash
-# Explicit primary + fallback for grounding only
-uv run lumiseval run grounding \
-  --input sample.json \
-  --llm-model grounding=openai/gpt-4o \
-  --llm-fallback grounding=openai/gpt-4o-mini
-```
-
-Defaults when no flags are provided:
-
-- primary: `openai/gpt-4o-mini`
-- fallback: `openai/gpt-4o`
-
-### 5.4 Hugging Face dataset source
-
-```bash
-uv run lumiseval estimate relevance \
+nexagauge estimate relevance \
   --input hf://openai/gsm8k \
   --adapter huggingface \
   --hf-config main \
@@ -204,125 +135,11 @@ uv run lumiseval estimate relevance \
   --limit 20
 ```
 
-## 6) Important CLI Options
+## 8) Troubleshooting
 
-- source selection:
-  - `--input`
-  - `--split`
-  - `--limit`
-  - `--adapter`
-  - `--hf-config`
-  - `--hf-revision`
-- model/runtime:
-  - `--model`
-  - `--llm-model` (repeatable, accepts `MODEL` or `NODE=MODEL`)
-  - `--llm-fallback` (repeatable, accepts `MODEL` or `NODE=MODEL`)
-  - `--web-search`
-  - `--evidence-threshold`
-- execution controls:
-  - `--continue-on-error/--fail-fast` (`run` only)
-  - `--force`
-  - `--no-cache`
-  - `--cache-dir`
-  - `--output-dir` (`run eval` only)
-
-## 7) Cache Semantics
-
-Cache is node-level and keyed by:
-
-- case hash: content fields (`generation`, `question`, `reference`, `context`, `geval`, `reference_files`)
-- config hash: execution config (`judge_model`, enable flags, web/evidence settings)
-
-Implications:
-
-- rerunning same target on unchanged data reuses cached nodes
-- extending from one branch to another reuses shared prerequisites
-- adding new rows only computes uncached rows
-
-`estimate` reflects **delta cost** (uncached work only).
-
-## 8) API Contract (Design, Handlers Later)
-
-Planned endpoints:
-
-- `POST /estimate`
-- `POST /run`
-
-Shared request shape:
-
-```json
-{
-  "target_node": "grounding",
-  "cases": [
-    {
-      "case_id": "eiffel-1",
-      "question": "Where is the Eiffel Tower?",
-      "generation": "The Eiffel Tower is in Paris, France.",
-      "context": ["The Eiffel Tower is in Paris."],
-      "reference": "The Eiffel Tower is located in Paris.",
-      "geval": {
-        "metrics": []
-      }
-    }
-  ],
-  "job_config": {
-    "judge_model": "gpt-4o-mini",
-    "web_search": false,
-    "evidence_threshold": 0.75,
-    "enable_grounding": true,
-    "enable_relevance": true,
-    "enable_redteam": true,
-    "enable_geval": true,
-    "enable_reference": true
-  },
-  "force": false
-}
-```
-
-Planned `/estimate` response shape:
-
-```json
-{
-  "target_node": "grounding",
-  "scan": { "record_count": 10, "total_tokens": 12345 },
-  "plan": {
-    "planned_nodes": ["scan", "chunk", "claims", "dedup", "grounding"],
-    "to_run_case_ids_by_node": {},
-    "cached_case_ids_by_node": {},
-    "skipped_case_ids_by_node": {}
-  },
-  "cost": {
-    "rows": [],
-    "target_delta_cost_usd": 0.1234
-  }
-}
-```
-
-Planned `/run` response shape:
-
-```json
-{
-  "target_node": "grounding",
-  "results": [
-    {
-      "case_id": "eiffel-1",
-      "executed_nodes": ["scan", "chunk", "claims", "dedup", "grounding"],
-      "cached_nodes": [],
-      "output": {}
-    }
-  ]
-}
-```
-
-For `target_node=eval`, each result includes `report` with `cost_estimate`.
-
-## 9) Troubleshooting
-
-- `Unknown node ...`
-  - use one of the canonical nodes listed above
-- `Invalid dataset source ...`
-  - verify local path or `hf://<dataset-id>` format
-- no HF adapter
-  - install `datasets`
-- model key errors
-  - set `OPENAI_API_KEY`
+| Error | Resolution |
+|---|---|
+| `Unknown node '...'` | Use one of the canonical node names listed above. |
+| `Could not resolve dataset source` | Use an existing local path or `hf://<dataset-id>`. |
+| `datasets package is required for hf:// adapters` | Install `nexa-gauge[huggingface]`. |
+| Authentication errors | Set provider key (for example `OPENAI_API_KEY`). |
