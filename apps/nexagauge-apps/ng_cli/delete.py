@@ -75,7 +75,8 @@ def delete_cache(
         raise typer.Exit(0)
 
     if not root.is_dir():
-        console.print(f"[red]Refusing to delete: {root} is not a directory.[/red]")
+        console.print("[red]Refusing to delete: not a directory.[/red]")
+        console.print(f"[red]{root}[/red]")
         raise typer.Exit(1)
 
     total_bytes, total_files = _directory_size(root)
