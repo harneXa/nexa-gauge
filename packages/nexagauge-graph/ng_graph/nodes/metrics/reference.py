@@ -34,6 +34,7 @@ class _NoWordNet:
     def synsets(self, _word: str) -> list[object]:
         return []
 
+
 # Download required NLTK data (no-op if already present)
 nltk.download("wordnet", quiet=True)
 nltk.download("omw-1.4", quiet=True)
@@ -88,9 +89,7 @@ class ReferenceNode(BaseMetricNode):
             with _METEOR_LOCK:
                 score = meteor_score([ref_tokens], hypothesis)
         except Exception as exc:
-            log.warning(
-                f"METEOR WordNet path failed ({exc}); falling back to token-only METEOR"
-            )
+            log.warning(f"METEOR WordNet path failed ({exc}); falling back to token-only METEOR")
             try:
                 with _METEOR_LOCK:
                     score = meteor_score([ref_tokens], hypothesis, wordnet=_NoWordNet())

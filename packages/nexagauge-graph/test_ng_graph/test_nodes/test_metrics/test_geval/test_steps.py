@@ -476,10 +476,12 @@ def test_parallel_and_serial_generation_preserve_metric_order(
     )
 
     assert [m.name for m in serial.resolved_steps] == [m.name for m in parallel.resolved_steps]
-    assert [m.signature for m in serial.resolved_steps] == [m.signature for m in parallel.resolved_steps]
-    assert [
-        [step.text for step in m.evaluation_steps] for m in serial.resolved_steps
-    ] == [[step.text for step in m.evaluation_steps] for m in parallel.resolved_steps]
+    assert [m.signature for m in serial.resolved_steps] == [
+        m.signature for m in parallel.resolved_steps
+    ]
+    assert [[step.text for step in m.evaluation_steps] for m in serial.resolved_steps] == [
+        [step.text for step in m.evaluation_steps] for m in parallel.resolved_steps
+    ]
     assert serial.cost is not None and parallel.cost is not None
     assert serial.cost.input_tokens == parallel.cost.input_tokens
     assert serial.cost.output_tokens == parallel.cost.output_tokens

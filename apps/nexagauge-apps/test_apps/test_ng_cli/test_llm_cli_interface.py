@@ -510,7 +510,9 @@ def test_run_command_sets_llm_concurrency(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(main_module, "create_dataset_adapter", lambda **kwargs: _Adapter())
     monkeypatch.setattr(main_module, "CachedNodeRunner", _Runner)
-    monkeypatch.setattr("ng_cli.run.set_llm_concurrency", lambda value: captured_limits.append(value))
+    monkeypatch.setattr(
+        "ng_cli.run.set_llm_concurrency", lambda value: captured_limits.append(value)
+    )
 
     main_module.run(
         node_name="grounding",

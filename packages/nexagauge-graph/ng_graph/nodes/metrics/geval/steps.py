@@ -284,7 +284,9 @@ class GevalStepsNode(BaseMetricNode):
                     key=metric.name,
                     name=metric.name,
                     item_fields=item_fields,
-                    evaluation_steps=[Item(**step.model_dump()) for step in metric.evaluation_steps],
+                    evaluation_steps=[
+                        Item(**step.model_dump()) for step in metric.evaluation_steps
+                    ],
                     steps_source="provided",
                     signature=None,
                 )
@@ -320,7 +322,7 @@ class GevalStepsNode(BaseMetricNode):
             max_workers = min(len(jobs), GEVAL_STEPS_MAX_WORKERS)
 
             def _generate_for_job(
-                job: tuple[int, tuple[str, list[str], Item, str]]
+                job: tuple[int, tuple[str, list[str], Item, str]],
             ) -> tuple[int, tuple[list[Item], CostEstimate]]:
                 idx, (criteria_text, item_fields, _, _) = job
                 metric = metrics[idx]

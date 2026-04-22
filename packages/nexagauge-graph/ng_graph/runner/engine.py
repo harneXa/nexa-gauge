@@ -253,7 +253,9 @@ class CachedNodeRunner:
                 ):
                     ready.add(dependent)
 
-        def _timed_step_run(step_name: str, snapshot: dict[str, Any]) -> tuple[dict[str, Any], float]:
+        def _timed_step_run(
+            step_name: str, snapshot: dict[str, Any]
+        ) -> tuple[dict[str, Any], float]:
             node_t0 = time.monotonic()
             out = NODE_FNS[step_name](snapshot)
             return out, (time.monotonic() - node_t0) * 1000
@@ -425,7 +427,9 @@ class CachedNodeRunner:
                 while True:
                     if emit_index in buffered_results:
                         result = buffered_results.pop(emit_index)
-                        yield CaseRunOutcome(index=emit_index, case_id=result.case_id, result=result)
+                        yield CaseRunOutcome(
+                            index=emit_index, case_id=result.case_id, result=result
+                        )
                         emit_index += 1
                         continue
 
