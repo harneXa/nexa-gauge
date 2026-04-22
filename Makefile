@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install sync lint lint-fix format typecheck test test-verbose test-pkg test_graph ci clean clean-venv api
+.PHONY: help install sync lint lint-fix format fix typecheck test test-verbose test-pkg test_graph ci clean clean-venv api
 
 # ── Variables ──────────────────────────────────────────────────────────────
 PROJECT_NAME := nexa-gauge
@@ -23,10 +23,8 @@ lint: ## Run ruff linter (use FIX=1 to apply fixes)
 	uv run ruff check $(if $(FIX),--fix,) .
 
 lint-fix: ## Run ruff linter and apply safe fixes
-	uv run ruff check --fix .
-
-format: ## Auto-format with ruff
 	uv run ruff format .
+	uv run ruff check --fix .
 
 typecheck: ## Run mypy across packages
 	uv run mypy packages/
@@ -45,7 +43,7 @@ test_graph: ## Run nexagauge-graph tests with output
 	VIRTUAL_ENV= uv run --all-packages --group dev -m pytest -s packages/nexagauge-graph/test_ng_graph
 
 # ── CI ─────────────────────────────────────────────────────────────────────
-ci: ## Run full CI pipeline locally (format check → lint → test)
+test_ci: ## Run full CI pipeline locally (format check → lint → test)
 	@echo "==> format check"
 	uv run ruff format --check .
 	@echo "==> lint"

@@ -4,6 +4,7 @@
 # uv run pytest -s -k "reference" packages/nexagauge-graph/test_ng_graph/test_nodes/test_reference.py
 
 from ng_core.types import Item, MetricCategory
+from ng_graph.nodes.metrics import reference as reference_module
 from ng_graph.nodes.metrics.reference import ReferenceNode
 
 
@@ -62,3 +63,25 @@ def test_estimate_returns_zero_cost() -> None:
     assert cost.cost == 0.0
     assert cost.input_tokens is None
     assert cost.output_tokens is None
+
+
+def test_run_meteor_falls_back_when_wordnet_path_errors(monkeypatch) -> None:
+    node = ReferenceNode()
+
+    def _fake_meteor_score(references, hypothesis, **kwargs):
+        del references, hypothesis
+        if "wordnet" not in kwargs:
+            raise AttributeError("'NoneType' object has no attribute 'close'")
+        assert isinstance(kwargs["wordnet"], reference_module._NoWordNet)
+        return 0.1234
+
+    monkeypatch.setattr(reference_module, "meteor_score", _fake_meteor_score)
+
+    result = node.run(
+        generation="Paris is the capital of France.",
+        reference="Paris is the capital of France.",
+        enable_generation_metrics=True,
+    )
+
+    meteor = next(m for m in result.metrics if m.name == "meteor")
+    assert meteor.score == 0.1234

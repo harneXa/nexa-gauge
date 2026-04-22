@@ -1,3 +1,5 @@
+from threading import Lock
+
 import numpy as np
 from ng_core.config import config
 from ng_core.constants import MMR_LAMBDA, MMR_SIMILARITY_THRESHOLD
@@ -8,13 +10,22 @@ _SIMILARITY_THRESHOLD = MMR_SIMILARITY_THRESHOLD
 _LAMBDA = MMR_LAMBDA
 
 _model: SentenceTransformer | None = None
+_model_init_lock = Lock()
 
 
 def _get_model() -> SentenceTransformer:
     """Lazily initialize and reuse the local embedding model."""
     global _model
     if _model is None:
-        _model = SentenceTransformer(config.EMBEDDING_MODEL)
+        # Double-checked locking to avoid rare concurrent first-load races.
+        # When running with async workers, many may call the `_get_model` at the same
+        # time and hence the _model may be invoked multiple times
+        # We put a lock here, the locak may introduce negligible overhead
+        # and may not affect in real world. When the first hit locks the model
+        # the other workers wait and can't pass `if _model is None:` as the model will be available
+        with _model_init_lock:
+            if _model is None:
+                _model = SentenceTransformer(config.EMBEDDING_MODEL)
     return _model
 
 

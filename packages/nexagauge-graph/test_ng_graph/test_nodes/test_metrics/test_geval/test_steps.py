@@ -1,3 +1,4 @@
+import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -403,3 +404,84 @@ def test_prompt_contains_param_names(tmp_path, monkeypatch: pytest.MonkeyPatch) 
     user_content = captured["messages"][0][1]["content"]
     assert "Actual Output" in user_content
     assert "Expected Output" in user_content
+
+
+def test_parallel_and_serial_generation_preserve_metric_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeLLM:
+        def invoke(self, messages):
+            content = messages[1]["content"]
+            if "criteria-a" in content:
+                time.sleep(0.04)
+                suffix = "A"
+            elif "criteria-b" in content:
+                time.sleep(0.01)
+                suffix = "B"
+            else:
+                suffix = "C"
+            return {
+                "parsed": SimpleNamespace(
+                    evaluation_steps=[
+                        f"Step 1 {suffix}",
+                        f"Step 2 {suffix}",
+                        f"Step 3 {suffix}",
+                    ]
+                ),
+                "parsing_error": None,
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 25,
+                    "total_tokens": 125,
+                },
+                "model": "gpt-4o-mini",
+            }
+
+    monkeypatch.setattr(steps_module, "get_llm", lambda *_a, **_kw: FakeLLM())
+
+    metrics = [
+        GevalMetricInput(
+            name="metric_a",
+            item_fields=["generation"],
+            criteria=Item(text="criteria-a", tokens=4),
+            evaluation_steps=[],
+        ),
+        GevalMetricInput(
+            name="metric_b",
+            item_fields=["generation"],
+            criteria=Item(text="criteria-b", tokens=4),
+            evaluation_steps=[],
+        ),
+        GevalMetricInput(
+            name="metric_c",
+            item_fields=["generation"],
+            criteria=Item(text="criteria-c", tokens=4),
+            evaluation_steps=[],
+        ),
+    ]
+
+    monkeypatch.setattr(steps_module, "GEVAL_STEPS_MAX_WORKERS", 1)
+    serial = GevalStepsNode(judge_model="gpt-4o-mini", artifact_cache_store=NoOpCacheStore()).run(
+        metrics=metrics,
+        enable_geval=True,
+    )
+
+    monkeypatch.setattr(steps_module, "GEVAL_STEPS_MAX_WORKERS", 8)
+    parallel = GevalStepsNode(
+        judge_model="gpt-4o-mini",
+        artifact_cache_store=NoOpCacheStore(),
+    ).run(
+        metrics=metrics,
+        enable_geval=True,
+    )
+
+    assert [m.name for m in serial.resolved_steps] == [m.name for m in parallel.resolved_steps]
+    assert [m.signature for m in serial.resolved_steps] == [
+        m.signature for m in parallel.resolved_steps
+    ]
+    assert [[step.text for step in m.evaluation_steps] for m in serial.resolved_steps] == [
+        [step.text for step in m.evaluation_steps] for m in parallel.resolved_steps
+    ]
+    assert serial.cost is not None and parallel.cost is not None
+    assert serial.cost.input_tokens == parallel.cost.input_tokens
+    assert serial.cost.output_tokens == parallel.cost.output_tokens

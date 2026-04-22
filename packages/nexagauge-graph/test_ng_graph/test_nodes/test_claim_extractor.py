@@ -4,6 +4,7 @@
 # uv run pytest -s -k "claim_extractor" packages/nexagauge-graph/test_ng_graph/test_nodes/test_claim_extractor.py
 
 import hashlib
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -76,3 +77,50 @@ def test_run_raises_on_parsing_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(ValueError, match="bad parse"):
         node.run(chunks)
+
+
+def test_parallel_and_serial_runs_return_same_ordered_claims(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeLLM:
+        def invoke(self, messages):
+            content = messages[1]["content"]
+            if "chunk-0" in content:
+                time.sleep(0.04)
+                claim = "claim-for-0"
+            elif "chunk-1" in content:
+                time.sleep(0.01)
+                claim = "claim-for-1"
+            else:
+                claim = "claim-for-2"
+            return {
+                "parsed": SimpleNamespace(claims=[claim], confidences=[0.8]),
+                "parsing_error": None,
+                "usage": {
+                    "prompt_tokens": 50,
+                    "completion_tokens": 10,
+                    "total_tokens": 60,
+                },
+                "model": "gpt-4o-mini",
+            }
+
+    monkeypatch.setattr(claim_module, "get_llm", lambda *_args, **_kwargs: FakeLLM())
+
+    chunks = [
+        _make_chunk(0, "chunk-0 text"),
+        _make_chunk(1, "chunk-1 text"),
+        _make_chunk(2, "chunk-2 text"),
+    ]
+
+    monkeypatch.setattr(claim_module, "CLAIMS_MAX_WORKERS", 1)
+    serial = ClaimExtractorNode(model="gpt-4o-mini").run(chunks)
+
+    monkeypatch.setattr(claim_module, "CLAIMS_MAX_WORKERS", 8)
+    parallel = ClaimExtractorNode(model="gpt-4o-mini").run(chunks)
+
+    assert [c.item.text for c in serial.claims] == [c.item.text for c in parallel.claims]
+    assert [c.source_chunk_index for c in serial.claims] == [
+        c.source_chunk_index for c in parallel.claims
+    ]
+    assert serial.cost.input_tokens == parallel.cost.input_tokens
+    assert serial.cost.output_tokens == parallel.cost.output_tokens

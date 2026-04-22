@@ -180,6 +180,45 @@ def test_run_cases_iter_fail_fast_stops_after_first_ordered_failure(monkeypatch)
     assert "boom" in (outcomes[1].error or "")
 
 
+def test_report_target_parallelizes_independent_branches(monkeypatch) -> None:
+    timestamps: dict[str, float] = {}
+
+    def _mk_node(name: str, delay_s: float):
+        def _fn(_state: dict) -> dict:
+            timestamps[f"{name}_start"] = time.monotonic()
+            time.sleep(delay_s)
+            timestamps[f"{name}_end"] = time.monotonic()
+            return {f"{name}_marker": name}
+
+        return _fn
+
+    monkeypatch.setitem(runner_module.NODE_FNS, "scan", _mk_node("scan", 0.01))
+    monkeypatch.setitem(runner_module.NODE_FNS, "chunk", _mk_node("chunk", 0.12))
+    monkeypatch.setitem(runner_module.NODE_FNS, "claims", _mk_node("claims", 0.12))
+    monkeypatch.setitem(runner_module.NODE_FNS, "dedup", _mk_node("dedup", 0.12))
+    monkeypatch.setitem(runner_module.NODE_FNS, "geval_steps", _mk_node("geval_steps", 0.15))
+    monkeypatch.setitem(runner_module.NODE_FNS, "relevance", _mk_node("relevance", 0.05))
+    monkeypatch.setitem(runner_module.NODE_FNS, "grounding", _mk_node("grounding", 0.05))
+    monkeypatch.setitem(runner_module.NODE_FNS, "redteam", _mk_node("redteam", 0.03))
+    monkeypatch.setitem(runner_module.NODE_FNS, "geval", _mk_node("geval", 0.03))
+    monkeypatch.setitem(runner_module.NODE_FNS, "reference", _mk_node("reference", 0.03))
+    monkeypatch.setitem(runner_module.NODE_FNS, "eval", _mk_node("eval", 0.0))
+    monkeypatch.setitem(runner_module.NODE_FNS, "report", _mk_node("report", 0.0))
+
+    runner = CachedNodeRunner(cache_store=NoOpCacheStore())
+    result = runner.run_case(
+        case={"case_id": "case-report", "generation": "hello"},
+        node_name="report",
+        execution_mode="run",
+        force=True,
+    )
+
+    assert "redteam" in result.executed_nodes
+    assert "reference" in result.executed_nodes
+    assert timestamps["redteam_start"] < timestamps["dedup_end"]
+    assert timestamps["reference_start"] < timestamps["dedup_end"]
+
+
 def test_estimate_mode_reuses_run_cache_for_shared_prerequisites(monkeypatch, tmp_path) -> None:
     def _fake_scan(_state: dict) -> dict:
         return {"scan_marker": "ok"}
