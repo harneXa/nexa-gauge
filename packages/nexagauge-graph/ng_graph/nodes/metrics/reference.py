@@ -8,6 +8,8 @@ Returns one MetricResult per metric: ROUGE-1, ROUGE-2, ROUGE-L, BLEU, METEOR.
 All scores are in the 0.0–1.0 range where 1.0 is best.
 """
 
+from threading import Lock
+
 import nltk
 from ng_core.types import (
     CostEstimate,
@@ -23,6 +25,14 @@ from nltk.translate.meteor_score import meteor_score
 from rouge_score import rouge_scorer
 
 log = get_node_logger("reference")
+_METEOR_LOCK = Lock()
+
+
+class _NoWordNet:
+    """Fallback shim for METEOR when WordNet access is unavailable/unstable."""
+
+    def synsets(self, _word: str) -> list[object]:
+        return []
 
 # Download required NLTK data (no-op if already present)
 nltk.download("wordnet", quiet=True)
@@ -72,7 +82,21 @@ class ReferenceNode(BaseMetricNode):
         """Compute METEOR score against reference."""
         hypothesis = generation.split()
         ref_tokens = reference.split()
-        score = meteor_score([ref_tokens], hypothesis)
+        try:
+            # NLTK WordNet access inside METEOR is not reliably thread-safe in
+            # all environments; serialize calls to avoid intermittent crashes.
+            with _METEOR_LOCK:
+                score = meteor_score([ref_tokens], hypothesis)
+        except Exception as exc:
+            log.warning(
+                f"METEOR WordNet path failed ({exc}); falling back to token-only METEOR"
+            )
+            try:
+                with _METEOR_LOCK:
+                    score = meteor_score([ref_tokens], hypothesis, wordnet=_NoWordNet())
+            except Exception as fallback_exc:
+                log.warning(f"METEOR fallback failed ({fallback_exc}); defaulting score to 0.0")
+                score = 0.0
         return MetricResult(
             name="meteor",
             category=MetricCategory.ANSWER,

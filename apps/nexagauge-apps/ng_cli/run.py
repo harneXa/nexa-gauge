@@ -1,8 +1,39 @@
+"""Run CLI entrypoint and concurrency tuning guide.
+
+Concurrency knobs:
+- ``--max-workers``: case-level parallelism (how many records run at once).
+- ``--max-in-flight``: cap on submitted-but-not-yet-emitted cases.
+- ``--llm-concurrency``: global cap on in-flight LLM calls across all threads.
+
+Suggested local profiles (16-core machine):
+
+1. Debug / deterministic
+- ``--max-workers 1``
+- ``--llm-concurrency 8``
+- keep ``--max-in-flight`` unset (ignored when max-workers=1)
+
+2. Normal throughput (recommended default for daily runs)
+- ``--max-workers 4``
+- ``--llm-concurrency 16``
+- keep ``--max-in-flight`` unset (defaults to ``2 * max-workers``)
+
+3. High throughput (only if provider quota/rate limits allow)
+- ``--max-workers 6`` (or 8)
+- ``--llm-concurrency 24`` (or higher if stable)
+- optionally ``--max-in-flight 18`` (about ``3 * max-workers``) for high latency/jitter
+
+Tuning tips:
+- If you see rate-limit/retry errors, reduce ``--llm-concurrency`` first.
+- If workers idle during high latency variance, increase ``--max-in-flight``.
+- For ``--debug``, prefer ``--max-workers 1`` for readable logs.
+"""
+
 from __future__ import annotations
 
+from dataclasses import dataclass
 from itertools import islice
 from pathlib import Path
-from typing import Optional
+from typing import Any, Callable, Iterable, Iterator, Optional
 
 import typer
 from adapters import create_dataset_adapter
@@ -16,15 +47,47 @@ from .util import (
     DEFAULT_PRIMARY_LLM,
     _case_progress,
     _is_case_eligible_for_target_path,
+    _is_node_eligible_for_inputs,
+    _plan_nodes_for_target,
     _print_llm_routing_summary,
     _print_node_timings_summary,
     _progress_total_from_bounds,
     _resolve_runtime_llm_overrides,
     _resolve_target_node,
+    _scan_inputs_from_case,
     _set_case_llm_overrides,
     _write_report_json,
     console,
 )
+
+# Write me comments after each argument of what is does `llm_concurency`, `max_in_flight`, `max_workers`
+
+@dataclass
+class _RunEligibilityStats:
+    submitted_cases: int
+    eligible_counts_by_node: dict[str, int]
+
+
+def _iter_eligible_cases_with_overrides(
+    *,
+    selected_cases: Iterable[Any],
+    advance_progress: Callable[[], None],
+    target_node: str,
+    branch_nodes: list[str],
+    llm_overrides: dict[str, dict[str, str]],
+    stats: _RunEligibilityStats,
+) -> Iterator[Any]:
+    """Stream eligible cases while tracking per-node eligibility stats."""
+    for case in selected_cases:
+        advance_progress()
+        if not _is_case_eligible_for_target_path(target_node=target_node, case=case):
+            continue
+        inputs = _scan_inputs_from_case(case)
+        for node in branch_nodes:
+            if _is_node_eligible_for_inputs(node, inputs):
+                stats.eligible_counts_by_node[node] += 1
+        stats.submitted_cases += 1
+        yield _set_case_llm_overrides(case, llm_overrides)
 
 
 def run(
@@ -101,24 +164,37 @@ def run(
         "--continue-on-error/--fail-fast",
         help="Continue processing remaining cases if one case fails.",
     ),
+    # Case-level parallelism: how many records are processed at the same time.
     max_workers: int = typer.Option(
         1,
         "--max-workers",
         min=1,
-        help="Number of records to process concurrently.",
+        help=(
+            "Case-level parallelism. Number of records processed concurrently. "
+            "Default 1 means one case at a time."
+        ),
     ),
+    # Global cap across all threads for live LLM requests (run + fallback calls).
+    # This is the main guardrail against rate limits/provider overload.
     llm_concurrency: int = typer.Option(
         16,
         "--llm-concurrency",
         min=1,
-        help="Global cap on concurrent LLM calls across all worker threads.",
+        help=(
+            "Global cap on concurrent LLM calls across all worker threads. "
+            "Lower this to reduce provider pressure/rate-limit risk."
+        ),
     ),
+    # Backpressure window for submitted cases waiting to be emitted in input order.
+    # Caps submitted-but-not-yet-emitted case futures, Default is 2 * max_workers via normalization
+    # Only matters when max_workers > 1.
     max_in_flight: Optional[int] = typer.Option(
         None,
         "--max-in-flight",
         min=1,
         help=(
-            "Maximum number of submitted-but-not-yet-emitted records. Defaults to max_workers * 2."
+            "Upper bound on submitted-but-not-yet-emitted cases. "
+            "Only used when max_workers > 1. Defaults to max_workers * 2."
         ),
     ),
     force: bool = typer.Option(False, "--force", help="Ignore cache reads (still writes)."),
@@ -179,6 +255,11 @@ def run(
     failed = 0
     failures: list[tuple[str, str]] = []
     timings_by_case: list[dict[str, float]] = []
+    branch_nodes = _plan_nodes_for_target(target_node)
+    eligibility_stats = _RunEligibilityStats(
+        submitted_cases=0,
+        eligible_counts_by_node={node: 0 for node in branch_nodes},
+    )
 
     effective_end = end
     if limit is not None:
@@ -204,16 +285,15 @@ def run(
             description=f"run:{target_node}",
             total=_progress_total_from_bounds(start=start, end=effective_end),
         ) as advance_progress:
-            # Keep this fully streaming: no dataset materialization.
-            def _iter_eligible_cases_with_overrides():
-                for case in selected_cases:
-                    advance_progress()
-                    if not _is_case_eligible_for_target_path(target_node=target_node, case=case):
-                        continue
-                    yield _set_case_llm_overrides(case, llm_overrides)
-
             for outcome in runner.run_cases_iter(
-                cases=_iter_eligible_cases_with_overrides(),
+                cases=_iter_eligible_cases_with_overrides(
+                    selected_cases=selected_cases,
+                    advance_progress=advance_progress,
+                    target_node=target_node,
+                    branch_nodes=branch_nodes,
+                    llm_overrides=llm_overrides,
+                    stats=eligibility_stats,
+                ),
                 node_name=target_node,
                 force=force,
                 execution_mode="run",
@@ -246,7 +326,11 @@ def run(
         set_node_logging_enabled(False)
 
     if debug:
-        _print_node_timings_summary(timings_by_case)
+        _print_node_timings_summary(
+            timings_by_case,
+            eligible_counts_by_node=eligibility_stats.eligible_counts_by_node,
+            total_cases=eligibility_stats.submitted_cases,
+        )
 
     console.print(
         f"\n[bold green]Done.[/bold green]  "

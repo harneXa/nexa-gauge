@@ -15,6 +15,7 @@ Usage:
     tokens   = response["usage"]    # {"prompt_tokens": int, "completion_tokens": int, ...}
 """
 
+from threading import BoundedSemaphore, Lock
 from typing import Any, Dict, List, Mapping, Optional, Type, TypeVar
 
 import litellm
@@ -29,6 +30,26 @@ T = TypeVar("T", bound=BaseModel)
 
 # ── Module-level instance cache ─────────────────────────────────────────────
 _cache: Dict[str, "StructuredLLM"] = {}
+_LLM_CONCURRENCY_LOCK = Lock()
+_LLM_CONCURRENCY = 16
+_LLM_SEMAPHORE = BoundedSemaphore(_LLM_CONCURRENCY)
+
+
+def set_llm_concurrency(limit: int) -> None:
+    """Set process-wide max number of concurrent LLM calls."""
+    if limit < 1:
+        raise ValueError("llm concurrency must be >= 1")
+
+    global _LLM_CONCURRENCY, _LLM_SEMAPHORE
+    with _LLM_CONCURRENCY_LOCK:
+        _LLM_CONCURRENCY = int(limit)
+        _LLM_SEMAPHORE = BoundedSemaphore(_LLM_CONCURRENCY)
+
+
+def get_llm_concurrency() -> int:
+    """Return process-wide LLM concurrency limit."""
+    with _LLM_CONCURRENCY_LOCK:
+        return _LLM_CONCURRENCY
 
 
 class StructuredLLM:
@@ -98,16 +119,17 @@ class StructuredLLM:
         Returns:
             Dict with keys ``parsed``, ``parsing_error``, ``usage``, ``model``.
         """
-        try:
-            response = self._call(messages, self.model)
-            used_model = self.model
-        except Exception:
-            # Primary model failed (quota, auth, network, etc.); retry on fallback if configured.
-            if self.fallback_model:
-                response = self._call(messages, self.fallback_model)
-                used_model = self.fallback_model
-            else:
-                raise
+        with _LLM_SEMAPHORE:
+            try:
+                response = self._call(messages, self.model)
+                used_model = self.model
+            except Exception:
+                # Primary model failed (quota, auth, network, etc.); retry on fallback if configured.
+                if self.fallback_model:
+                    response = self._call(messages, self.fallback_model)
+                    used_model = self.fallback_model
+                else:
+                    raise
 
         choice = response.choices[0]
         content = choice.message.content
@@ -147,19 +169,20 @@ class StructuredLLM:
         """
         logprobs_supported = True
         used_model = self.model
-        try:
-            response = self._call_with_logprobs(messages, self.model, top_logprobs)
-        except Exception:
-            # Primary logprobs call failed — try fallback, then retry without logprobs.
+        with _LLM_SEMAPHORE:
             try:
-                if not self.fallback_model:
-                    raise
-                response = self._call_with_logprobs(messages, self.fallback_model, top_logprobs)
-                used_model = self.fallback_model
+                response = self._call_with_logprobs(messages, self.model, top_logprobs)
             except Exception:
-                # Provider likely doesn't support logprobs (e.g. Ollama) — degrade gracefully.
-                response = self._call(messages, self.model)
-                logprobs_supported = False
+                # Primary logprobs call failed — try fallback, then retry without logprobs.
+                try:
+                    if not self.fallback_model:
+                        raise
+                    response = self._call_with_logprobs(messages, self.fallback_model, top_logprobs)
+                    used_model = self.fallback_model
+                except Exception:
+                    # Provider likely doesn't support logprobs (e.g. Ollama) — degrade gracefully.
+                    response = self._call(messages, self.model)
+                    logprobs_supported = False
 
         choice = response.choices[0]
         content = choice.message.content

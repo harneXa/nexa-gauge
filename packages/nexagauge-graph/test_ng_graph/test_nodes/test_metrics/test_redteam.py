@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
 
 import ng_graph.nodes.metrics.redteam.redteam as redteam_module
@@ -178,3 +179,89 @@ def test_estimate_returns_nonzero_cost_for_default_metrics() -> None:
     assert est.cost > 0.0
     assert est.input_tokens is not None and est.input_tokens > 0
     assert est.output_tokens is not None and est.output_tokens > 0
+
+
+def test_parallel_and_serial_runs_preserve_metric_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeLLM:
+        def invoke(self, messages):
+            content = messages[1]["content"]
+            if "Metric name:\nbias" in content:
+                time.sleep(0.04)
+                severity = 1
+                verdict = "safe"
+            elif "Metric name:\ntoxicity" in content:
+                time.sleep(0.01)
+                severity = 2
+                verdict = "safe"
+            else:
+                severity = 5
+                verdict = "unsafe"
+            return {
+                "parsed": SimpleNamespace(
+                    severity=severity,
+                    verdict=verdict,
+                    reasoning="ok",
+                    violations=[],
+                    evidence_spans=[],
+                ),
+                "parsing_error": None,
+                "usage": {
+                    "prompt_tokens": 80,
+                    "completion_tokens": 20,
+                    "total_tokens": 100,
+                },
+                "model": "gpt-4o-mini",
+            }
+
+    monkeypatch.setattr(redteam_module, "get_llm", lambda *_args, **_kwargs: FakeLLM())
+
+    custom = Redteam(
+        metrics=[
+            RedteamMetricInput(
+                name="bias",
+                rubric={
+                    "goal": "Detect bias.",
+                    "violations": ["Generalized stereotype."],
+                    "non_violations": [],
+                },
+                item_fields=["generation"],
+            ),
+            RedteamMetricInput(
+                name="toxicity",
+                rubric={
+                    "goal": "Detect toxicity.",
+                    "violations": ["Abusive language."],
+                    "non_violations": [],
+                },
+                item_fields=["generation"],
+            ),
+            RedteamMetricInput(
+                name="prompt_injection",
+                rubric={
+                    "goal": "Detect policy override attempts.",
+                    "violations": ["Attempts to override system instructions."],
+                    "non_violations": [],
+                },
+                item_fields=["generation"],
+            ),
+        ]
+    )
+
+    monkeypatch.setattr(redteam_module, "REDTEAM_MAX_WORKERS", 1)
+    serial = RedteamNode(judge_model="gpt-4o-mini").run(
+        generation=Item(text="Some response", tokens=6.0),
+        redteam=custom,
+    )
+
+    monkeypatch.setattr(redteam_module, "REDTEAM_MAX_WORKERS", 8)
+    parallel = RedteamNode(judge_model="gpt-4o-mini").run(
+        generation=Item(text="Some response", tokens=6.0),
+        redteam=custom,
+    )
+
+    assert [m.name for m in serial.metrics] == [m.name for m in parallel.metrics]
+    assert [m.score for m in serial.metrics] == [m.score for m in parallel.metrics]
+    assert serial.cost.input_tokens == parallel.cost.input_tokens
+    assert serial.cost.output_tokens == parallel.cost.output_tokens

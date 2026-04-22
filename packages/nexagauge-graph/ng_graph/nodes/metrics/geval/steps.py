@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from threading import Lock
 from typing import Any, Mapping, Optional
 
 from ng_core.cache import NodeCacheBackend
+from ng_core.config import config as cfg
 from ng_core.types import (
     CostEstimate,
     GevalCacheArtifact,
@@ -29,6 +32,7 @@ from ng_graph.nodes.metrics.geval.fields import format_param_names
 from pydantic import BaseModel, Field
 
 log = get_node_logger("geval_steps")
+GEVAL_STEPS_MAX_WORKERS = int(cfg.GEVAL_STEPS_MAX_WORKERS)
 
 
 class _GevalStepsResponse(BaseModel):
@@ -150,6 +154,7 @@ class GevalStepsNode(BaseMetricNode):
     ) -> None:
         super().__init__(judge_model=judge_model, llm_overrides=llm_overrides)
         self._cache_store = artifact_cache_store
+        self._usage_lock = Lock()
 
     def _signature(self, criteria: str, item_fields: list[str]) -> str:
         return compute_geval_signature(
@@ -225,7 +230,8 @@ class GevalStepsNode(BaseMetricNode):
                 },
             ]
         )
-        self._record_model_response(response, primary_model=self.judge_model)
+        with self._usage_lock:
+            self._record_model_response(response, primary_model=self.judge_model)
 
         pricing = get_model_pricing(self.judge_model)
         prompt_tokens = float(response["usage"]["prompt_tokens"])
@@ -267,21 +273,20 @@ class GevalStepsNode(BaseMetricNode):
         total_output_tokens = 0.0
         total_cost = 0.0
 
-        for metric in metrics:
+        resolved_by_index: dict[int, GevalStepsResolved] = {}
+        missing_context: dict[int, tuple[str, list[str], Item, str]] = {}
+
+        for idx, metric in enumerate(metrics):
             item_fields = list(metric.item_fields)
 
             if metric.evaluation_steps:
-                resolved.append(
-                    GevalStepsResolved(
-                        key=metric.name,
-                        name=metric.name,
-                        item_fields=item_fields,
-                        evaluation_steps=[
-                            Item(**step.model_dump()) for step in metric.evaluation_steps
-                        ],
-                        steps_source="provided",
-                        signature=None,
-                    )
+                resolved_by_index[idx] = GevalStepsResolved(
+                    key=metric.name,
+                    name=metric.name,
+                    item_fields=item_fields,
+                    evaluation_steps=[Item(**step.model_dump()) for step in metric.evaluation_steps],
+                    steps_source="provided",
+                    signature=None,
                 )
                 continue
 
@@ -294,21 +299,53 @@ class GevalStepsNode(BaseMetricNode):
             cached_steps = self._read_cached_steps(signature)
 
             if cached_steps is not None:
-                resolved.append(
-                    GevalStepsResolved(
-                        key=metric.name,
-                        name=metric.name,
-                        item_fields=item_fields,
-                        evaluation_steps=[Item(**step.model_dump()) for step in cached_steps],
-                        steps_source="cache_used",
-                        signature=signature,
-                    )
+                resolved_by_index[idx] = GevalStepsResolved(
+                    key=metric.name,
+                    name=metric.name,
+                    item_fields=item_fields,
+                    evaluation_steps=[Item(**step.model_dump()) for step in cached_steps],
+                    steps_source="cache_used",
+                    signature=signature,
                 )
                 continue
 
-            generated_steps, generation_cost = self._generate_steps(
-                criteria_text, item_fields, metric.name
+            criteria_item = metric.criteria or Item(
+                text=criteria_text, tokens=float(_count_tokens(criteria_text)), cached=False
             )
+            missing_context[idx] = (criteria_text, item_fields, criteria_item, signature)
+
+        generated_by_index: dict[int, tuple[list[Item], CostEstimate]] = {}
+        if missing_context:
+            jobs = list(missing_context.items())
+            max_workers = min(len(jobs), GEVAL_STEPS_MAX_WORKERS)
+
+            def _generate_for_job(
+                job: tuple[int, tuple[str, list[str], Item, str]]
+            ) -> tuple[int, tuple[list[Item], CostEstimate]]:
+                idx, (criteria_text, item_fields, _, _) = job
+                metric = metrics[idx]
+                generated_steps, generation_cost = self._generate_steps(
+                    criteria_text, item_fields, metric.name
+                )
+                return idx, (generated_steps, generation_cost)
+
+            if max_workers <= 1:
+                generated_jobs = [_generate_for_job(job) for job in jobs]
+            else:
+                with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    generated_jobs = list(pool.map(_generate_for_job, jobs))
+            generated_by_index = dict(generated_jobs)
+
+        for idx, metric in enumerate(metrics):
+            if idx in resolved_by_index:
+                resolved.append(resolved_by_index[idx])
+                continue
+            if idx not in generated_by_index or idx not in missing_context:
+                continue
+
+            generated_steps, generation_cost = generated_by_index[idx]
+            _, item_fields, criteria_item, signature = missing_context[idx]
+
             total_input_tokens += float(generation_cost.input_tokens or 0.0)
             total_output_tokens += float(generation_cost.output_tokens or 0.0)
             total_cost += float(generation_cost.cost or 0.0)
@@ -316,10 +353,7 @@ class GevalStepsNode(BaseMetricNode):
             self._write_cached_steps(
                 signature=signature,
                 item_fields=item_fields,
-                criteria=metric.criteria
-                or Item(
-                    text=criteria_text, tokens=float(_count_tokens(criteria_text)), cached=False
-                ),
+                criteria=criteria_item,
                 evaluation_steps=generated_steps,
             )
             log.info(f"Generated GEval steps for metric={metric.name} signature={signature}")

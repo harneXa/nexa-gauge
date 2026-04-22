@@ -97,18 +97,24 @@ def estimate(
         "--continue-on-error/--fail-fast",
         help="Continue processing remaining cases if one case fails.",
     ),
+    # Case-level parallelism: how many records are estimated at once.
     max_workers: int = typer.Option(
         1,
         "--max-workers",
-        min=1,
-        help="Number of records to process concurrently.",
+        min=2,
+        help=(
+            "Case-level parallelism. Number of records estimated concurrently. "
+            "Default 1 means one case at a time."
+        ),
     ),
+    # Backpressure window for submitted estimate jobs waiting to be emitted in order.
     max_in_flight: Optional[int] = typer.Option(
         None,
         "--max-in-flight",
         min=1,
         help=(
-            "Maximum number of submitted-but-not-yet-emitted records. Defaults to max_workers * 2."
+            "Upper bound on submitted-but-not-yet-emitted cases. "
+            "Only used when max_workers > 1. Defaults to max_workers * 2."
         ),
     ),
     force: bool = typer.Option(False, "--force", help="Ignore cache reads (still writes)."),

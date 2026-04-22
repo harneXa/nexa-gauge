@@ -62,12 +62,19 @@ def _slug(value: str) -> str:
     return cleaned or "case"
 
 
-def _print_node_timings_summary(timings_by_case: list[Mapping[str, float]]) -> None:
+def _print_node_timings_summary(
+    timings_by_case: list[Mapping[str, float]],
+    *,
+    eligible_counts_by_node: Mapping[str, int] | None = None,
+    total_cases: int | None = None,
+) -> None:
     """Render a per-node latency table (count/p50/p95/sum) across cases.
 
     Cache hits are recorded as ``0.0`` in the underlying timings dict; they
     are excluded here so the stats reflect real execution latency. A separate
-    ``cached`` count shows how many cases hit cache for each node.
+    ``cached`` count shows how many cases hit cache for each node. When
+    ``eligible_counts_by_node`` is provided, ``ran`` displays eligible-case
+    totals per node instead of execution-only counts.
     """
     if not timings_by_case:
         return
@@ -86,8 +93,9 @@ def _print_node_timings_summary(timings_by_case: list[Mapping[str, float]]) -> N
         idx = max(0, min(len(samples) - 1, int(round(pct * (len(samples) - 1)))))
         return samples[idx]
 
+    case_count = int(total_cases) if total_cases is not None else len(timings_by_case)
     table = Table(
-        title=f"per-node timings across {len(timings_by_case)} case(s)",
+        title=f"per-node timings across {case_count} case(s)",
         show_header=True,
         header_style="bold cyan",
     )
@@ -102,7 +110,12 @@ def _print_node_timings_summary(timings_by_case: list[Mapping[str, float]]) -> N
         raw = [float(t.get(node, -1.0)) for t in timings_by_case if node in t]
         ran = sorted(s for s in raw if s > 0.0)
         cached_count = sum(1 for s in raw if s == 0.0)
-        if not ran and cached_count == 0:
+        ran_count = (
+            int(eligible_counts_by_node.get(node, 0))
+            if eligible_counts_by_node is not None
+            else len(ran)
+        )
+        if not ran and cached_count == 0 and ran_count == 0:
             continue
         p50 = _percentile(ran, 0.50) if ran else 0.0
         p95 = _percentile(ran, 0.95) if ran else 0.0
@@ -110,7 +123,7 @@ def _print_node_timings_summary(timings_by_case: list[Mapping[str, float]]) -> N
         color = NODES_BY_NAME[node].color if node in NODES_BY_NAME else "white"
         table.add_row(
             f"[{color}]{node}[/{color}]",
-            str(len(ran)),
+            str(ran_count),
             str(cached_count),
             f"{p50:.1f}" if ran else "—",
             f"{p95:.1f}" if ran else "—",

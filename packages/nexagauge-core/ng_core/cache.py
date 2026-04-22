@@ -83,7 +83,7 @@ Five axes, each orthogonal:
      ``CACHE_KEY_VERSION`` to force-miss historical entries.)
 
   4. ``node_route_fingerprint`` — NOT computed in this file. The runner
-     (``ng_graph/runner.py``) builds it by chaining, for this node
+     (``ng_graph/runner/fingerprints.py``) builds it by chaining, for this node
      AND every prerequisite node in its plan path:
          model             (resolved via llm_overrides → node config → cfg)
          fallback_model
@@ -95,7 +95,7 @@ Five axes, each orthogonal:
      "did anything in my dependency chain change?" check.
 
      **Want a new routing dimension to affect cache validity?**
-     Edit ``_node_route_fingerprint`` in ``runner.py`` — this file doesn't
+     Edit ``_node_route_fingerprint`` in ``runner/fingerprints.py`` — this file doesn't
      see routing; it just accepts whatever opaque string the runner hands in.
 
   5. ``CACHE_KEY_VERSION`` — global prefix. Bump to mass-invalidate.

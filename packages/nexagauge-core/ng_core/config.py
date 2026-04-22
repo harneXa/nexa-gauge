@@ -3,10 +3,12 @@ from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ng_core.constants import (
+    DEFAULT_CLAIMS_MAX_WORKERS,
     DEFAULT_EMBEDDING_MODEL,
+    DEFAULT_GEVAL_STEPS_MAX_WORKERS,
     DEFAULT_JUDGE_MODEL,
     DEFAULT_LLM_PROVIDER,
-    DEFAULT_MAX_CONCURRENT_JOBS,
+    DEFAULT_REDTEAM_MAX_WORKERS,
     EVIDENCE_VERDICT_SUPPORTED_THRESHOLD,
 )
 
@@ -35,10 +37,6 @@ class Config(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     ANTHROPIC_API_KEY: Optional[str] = None
 
-    # Web search
-    TAVILY_API_KEY: Optional[str] = None
-    WEB_SEARCH_ENABLED: bool = False
-
     # Embeddings
     EMBEDDING_MODEL: str = DEFAULT_EMBEDDING_MODEL
 
@@ -46,7 +44,9 @@ class Config(BaseSettings):
     EVIDENCE_THRESHOLD: float = EVIDENCE_VERDICT_SUPPORTED_THRESHOLD
 
     # Job execution
-    MAX_CONCURRENT_JOBS: int = DEFAULT_MAX_CONCURRENT_JOBS
+    CLAIMS_MAX_WORKERS: int = DEFAULT_CLAIMS_MAX_WORKERS
+    GEVAL_STEPS_MAX_WORKERS: int = DEFAULT_GEVAL_STEPS_MAX_WORKERS
+    REDTEAM_MAX_WORKERS: int = DEFAULT_REDTEAM_MAX_WORKERS
     BUDGET_CAP_USD: Optional[float] = None
 
 

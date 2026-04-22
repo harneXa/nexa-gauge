@@ -414,8 +414,6 @@ def test_run_command_filters_ineligible_cases_for_grounding(
         judge_model=DEFAULT_PRIMARY_LLM,
         llm_model=[],
         llm_fallback=[],
-        web_search=False,
-        evidence_threshold=0.75,
         yes=False,
         continue_on_error=True,
         max_workers=1,
@@ -472,8 +470,6 @@ def test_run_command_does_not_prefetch_all_cases(monkeypatch: pytest.MonkeyPatch
         judge_model=DEFAULT_PRIMARY_LLM,
         llm_model=[],
         llm_fallback=[],
-        web_search=False,
-        evidence_threshold=0.75,
         yes=False,
         continue_on_error=True,
         max_workers=1,
@@ -485,3 +481,140 @@ def test_run_command_does_not_prefetch_all_cases(monkeypatch: pytest.MonkeyPatch
     )
 
     assert captured_case_ids == ["c1"]
+
+
+def test_run_command_sets_llm_concurrency(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured_limits: list[int] = []
+
+    class _Adapter:
+        def iter_cases(self, split: str = "train", limit: int | None = None):
+            del split, limit
+            yield {"case_id": "c1", "generation": "hello", "context": "ctx"}
+
+    class _Runner:
+        def __init__(self, cache_store):
+            del cache_store
+
+        def run_cases_iter(self, **kwargs):
+            first = next(iter(kwargs["cases"]))
+            yield SimpleNamespace(
+                case_id=first["case_id"],
+                error=None,
+                result=SimpleNamespace(
+                    case_id=first["case_id"],
+                    executed_nodes=["scan"],
+                    cached_nodes=[],
+                    final_state={},
+                ),
+            )
+
+    monkeypatch.setattr(main_module, "create_dataset_adapter", lambda **kwargs: _Adapter())
+    monkeypatch.setattr(main_module, "CachedNodeRunner", _Runner)
+    monkeypatch.setattr("ng_cli.run.set_llm_concurrency", lambda value: captured_limits.append(value))
+
+    main_module.run(
+        node_name="grounding",
+        input="dummy.json",
+        split="train",
+        start=0,
+        end=None,
+        limit=None,
+        adapter="auto",
+        hf_config=None,
+        hf_revision=None,
+        judge_model=DEFAULT_PRIMARY_LLM,
+        llm_model=[],
+        llm_fallback=[],
+        yes=False,
+        continue_on_error=True,
+        max_workers=1,
+        llm_concurrency=7,
+        max_in_flight=None,
+        force=False,
+        no_cache=True,
+        cache_dir=None,
+        output_dir=None,
+    )
+
+    assert captured_limits == [7]
+
+
+def test_run_debug_summary_uses_per_node_eligible_counts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_summary: dict[str, object] = {}
+
+    class _Adapter:
+        def iter_cases(self, split: str = "train", limit: int | None = None):
+            del split, limit
+            yield {
+                "case_id": "with-context",
+                "generation": "hello",
+                "question": "q",
+                "context": "ctx",
+            }
+            yield {"case_id": "no-context", "generation": "hello", "question": "q"}
+
+    class _Runner:
+        def __init__(self, cache_store):
+            del cache_store
+
+        def run_cases_iter(self, **kwargs):
+            for case in kwargs["cases"]:
+                timings = {"scan": 1.0}
+                if case["case_id"] == "with-context":
+                    timings["grounding"] = 2.0
+                yield SimpleNamespace(
+                    case_id=case["case_id"],
+                    error=None,
+                    result=SimpleNamespace(
+                        case_id=case["case_id"],
+                        executed_nodes=["scan"],
+                        cached_nodes=[],
+                        final_state={},
+                        node_timings=timings,
+                    ),
+                )
+
+    def _capture_summary(
+        timings_by_case,
+        *,
+        eligible_counts_by_node=None,
+        total_cases=None,
+    ):
+        captured_summary["timings_by_case"] = list(timings_by_case)
+        captured_summary["eligible_counts_by_node"] = dict(eligible_counts_by_node or {})
+        captured_summary["total_cases"] = total_cases
+
+    monkeypatch.setattr(main_module, "create_dataset_adapter", lambda **kwargs: _Adapter())
+    monkeypatch.setattr(main_module, "CachedNodeRunner", _Runner)
+    monkeypatch.setattr("ng_cli.run._print_node_timings_summary", _capture_summary)
+
+    main_module.run(
+        node_name="eval",
+        input="dummy.json",
+        split="train",
+        start=0,
+        end=None,
+        limit=None,
+        adapter="auto",
+        hf_config=None,
+        hf_revision=None,
+        judge_model=DEFAULT_PRIMARY_LLM,
+        llm_model=[],
+        llm_fallback=[],
+        yes=False,
+        continue_on_error=True,
+        max_workers=1,
+        max_in_flight=None,
+        force=False,
+        no_cache=True,
+        cache_dir=None,
+        output_dir=None,
+        debug=True,
+    )
+
+    assert captured_summary["total_cases"] == 2
+    eligible_counts = captured_summary["eligible_counts_by_node"]
+    assert eligible_counts["scan"] == 2
+    assert eligible_counts["grounding"] == 1

@@ -1,7 +1,9 @@
 """Claim Extractor Node."""
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Mapping, Optional
 
+from ng_core.config import config as cfg
 from ng_core.constants import AVG_CLAIM_INPUT_TOKENS, DEFAULT_JUDGE_MODEL
 from ng_core.types import Chunk, Claim, ClaimArtifacts, CostEstimate, Item
 from ng_core.utils import _count_tokens, template_static_tokens
@@ -12,6 +14,7 @@ from ng_graph.nodes.base import BaseNode
 from pydantic import BaseModel, Field
 
 log = get_node_logger("claims")
+CLAIMS_MAX_WORKERS = int(cfg.CLAIMS_MAX_WORKERS)
 
 
 class _ClaimList(BaseModel):
@@ -51,45 +54,57 @@ class ClaimExtractorNode(BaseNode):
         all_claims: list[Claim] = []
         costs: list[CostEstimate] = []
 
-        for chunk in chunks:
-            response = llm.invoke(
-                [
-                    {"role": "system", "content": self.SYSTEM_PROMPT},
-                    {
-                        "role": "user",
-                        "content": self.USER_PROMPT.format(chunk_text=chunk.item.text),
-                    },
-                ]
-            )
-            self._record_model_response(response, primary_model=self.model)
-            if response["parsing_error"]:
-                raise response["parsing_error"]
+        if chunks:
+            max_workers = min(len(chunks), CLAIMS_MAX_WORKERS)
 
-            result: _ClaimList = response["parsed"]
-            if result is None:
-                continue
-
-            prompt_tokens = float(response["usage"]["prompt_tokens"])
-            completion_tokens = float(response["usage"]["completion_tokens"])
-            costs.append(
-                CostEstimate(
-                    input_tokens=prompt_tokens,
-                    output_tokens=completion_tokens,
-                    cost=(
-                        cost_usd(prompt_tokens, pricing, "input")
-                        + cost_usd(completion_tokens, pricing, "output")
-                    ),
+            def _invoke_for_chunk(chunk: Chunk) -> tuple[Chunk, dict[str, Any]]:
+                response = llm.invoke(
+                    [
+                        {"role": "system", "content": self.SYSTEM_PROMPT},
+                        {
+                            "role": "user",
+                            "content": self.USER_PROMPT.format(chunk_text=chunk.item.text),
+                        },
+                    ]
                 )
-            )
+                return chunk, response
 
-            for claim_text, confidence in zip(result.claims, result.confidences):
-                all_claims.append(
-                    Claim(
-                        item=Item(text=claim_text, tokens=float(_count_tokens(claim_text))),
-                        source_chunk_index=chunk.index,
-                        confidence=confidence,
+            if max_workers <= 1:
+                responses_in_order = [_invoke_for_chunk(chunk) for chunk in chunks]
+            else:
+                with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    responses_in_order = list(pool.map(_invoke_for_chunk, chunks))
+
+            for chunk, response in responses_in_order:
+                self._record_model_response(response, primary_model=self.model)
+                if response["parsing_error"]:
+                    raise response["parsing_error"]
+
+                result: _ClaimList = response["parsed"]
+                if result is None:
+                    continue
+
+                prompt_tokens = float(response["usage"]["prompt_tokens"])
+                completion_tokens = float(response["usage"]["completion_tokens"])
+                costs.append(
+                    CostEstimate(
+                        input_tokens=prompt_tokens,
+                        output_tokens=completion_tokens,
+                        cost=(
+                            cost_usd(prompt_tokens, pricing, "input")
+                            + cost_usd(completion_tokens, pricing, "output")
+                        ),
                     )
                 )
+
+                for claim_text, confidence in zip(result.claims, result.confidences):
+                    all_claims.append(
+                        Claim(
+                            item=Item(text=claim_text, tokens=float(_count_tokens(claim_text))),
+                            source_chunk_index=chunk.index,
+                            confidence=confidence,
+                        )
+                    )
         cumulative_cost = CostEstimate(
             input_tokens=sum(c.input_tokens or 0.0 for c in costs),
             output_tokens=sum(c.output_tokens or 0.0 for c in costs),

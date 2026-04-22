@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Literal, Optional
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
+from typing import Any, Literal, Mapping, Optional
 
+from ng_core.config import config as cfg
 from ng_core.constants import METRIC_PASS_THRESHOLD
 from ng_core.types import (
     CostEstimate,
@@ -26,6 +29,7 @@ from .bias import build_default_bias_metric
 from .toxicity import build_default_toxicity_metric
 
 log = get_node_logger("redteam")
+REDTEAM_MAX_WORKERS = int(cfg.REDTEAM_MAX_WORKERS)
 
 
 class _RedteamJudgeResponse(BaseModel):
@@ -68,6 +72,14 @@ class RedteamNode(BaseMetricNode):
     )
     static_prompt_tokens: int = _count_tokens(SYSTEM_PROMPT) + template_static_tokens(USER_PROMPT)
     avg_output_tokens_per_metric: float = 80.0
+
+    def __init__(
+        self,
+        judge_model: str = "gpt-4o-mini",
+        llm_overrides: Optional[Mapping[str, Any]] = None,
+    ) -> None:
+        super().__init__(judge_model=judge_model, llm_overrides=llm_overrides)
+        self._usage_lock = Lock()
 
     @staticmethod
     def _clamp_score(value: float) -> float:
@@ -222,7 +234,8 @@ class RedteamNode(BaseMetricNode):
                 },
             ]
         )
-        self._record_model_response(response, primary_model=self.judge_model)
+        with self._usage_lock:
+            self._record_model_response(response, primary_model=self.judge_model)
 
         pricing = get_model_pricing(self.judge_model)
         prompt_tokens = float(response["usage"]["prompt_tokens"])
@@ -298,14 +311,26 @@ class RedteamNode(BaseMetricNode):
         total_input_tokens = 0.0
         total_output_tokens = 0.0
 
-        for metric in metrics_to_run:
-            result, metric_cost = self._evaluate_metric(
+        def _evaluate_single(metric: RedteamMetricInput) -> tuple[MetricResult, CostEstimate]:
+            return self._evaluate_metric(
                 metric=metric,
                 generation=generation,
                 question=question,
                 reference=reference,
                 context=context,
             )
+
+        if metrics_to_run:
+            max_workers = min(len(metrics_to_run), REDTEAM_MAX_WORKERS)
+            if max_workers <= 1:
+                evaluations = [_evaluate_single(metric) for metric in metrics_to_run]
+            else:
+                with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    evaluations = list(pool.map(_evaluate_single, metrics_to_run))
+        else:
+            evaluations = []
+
+        for metric, (result, metric_cost) in zip(metrics_to_run, evaluations):
             results.append(result)
             total_cost += float(metric_cost.cost or 0.0)
             total_input_tokens += float(metric_cost.input_tokens or 0.0)

@@ -175,6 +175,7 @@ DEFAULT_DATASET_NAME: str = "user_dataset"
 DEFAULT_SPLIT: str = "train"
 
 # ── Job Execution ─────────────────────────────────────────────────────────────
-
-# Default maximum number of concurrent evaluation jobs.
-DEFAULT_MAX_CONCURRENT_JOBS: int = 4
+# Node-local internal fan-out caps (within a single case execution).
+DEFAULT_CLAIMS_MAX_WORKERS: int = 8
+DEFAULT_GEVAL_STEPS_MAX_WORKERS: int = 8
+DEFAULT_REDTEAM_MAX_WORKERS: int = 8
