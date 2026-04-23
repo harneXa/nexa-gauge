@@ -5,6 +5,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      force_publish:
+        description: Force publish even when release-please did not create a release in this run
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -27,7 +33,7 @@ jobs:
 
   publish:
     needs: release
-    if: needs.release.outputs.release_created == 'true'
+    if: needs.release.outputs.release_created == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.force_publish == 'true')
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -48,6 +54,42 @@ jobs:
 
       - name: Build sdist and wheel
         run: uv build
+
+      - name: Debug OIDC claims for PyPI trusted publishing
+        run: |
+          python - <<'PY'
+          import base64
+          import json
+          import os
+          import urllib.request
+
+          req = urllib.request.Request(
+              f"{os.environ['ACTIONS_ID_TOKEN_REQUEST_URL']}&audience=pypi",
+              headers={
+                  "Authorization": f"Bearer {os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']}"
+              },
+          )
+          with urllib.request.urlopen(req) as response:
+              token = json.load(response)["value"]
+
+          payload_segment = token.split(".")[1]
+          padding = "=" * (-len(payload_segment) % 4)
+          claims = json.loads(base64.urlsafe_b64decode(payload_segment + padding))
+
+          keys = [
+              "sub",
+              "repository",
+              "repository_owner",
+              "repository_owner_id",
+              "workflow_ref",
+              "job_workflow_ref",
+              "ref",
+              "environment",
+          ]
+          print("OIDC claims used for trusted publishing:")
+          for key in keys:
+              print(f"* {key}: {claims.get(key, 'MISSING')}")
+          PY
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

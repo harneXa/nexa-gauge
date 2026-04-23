@@ -18,9 +18,7 @@ permissions:
 
 jobs:
   enable-automerge:
-    if: >-
-      github.event.pull_request.user.login == 'release-please[bot]' &&
-      startsWith(github.event.pull_request.title, 'chore(main): release')
+    if: github.event.pull_request.user.login == 'release-please[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Enable auto-merge for release-please PR
