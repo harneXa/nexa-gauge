@@ -13,6 +13,12 @@ import pytest
 from ng_core.types import Item, MetricCategory, Redteam, RedteamMetricInput
 from ng_graph.nodes.metrics.redteam.redteam import RedteamNode
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from conftest import FakeLLM
+
 
 def _fake_response(
     *,
@@ -62,11 +68,11 @@ def test_run_uses_default_bias_and_toxicity_metrics(monkeypatch: pytest.MonkeyPa
         ]
     )
 
-    class FakeLLM:
+    class _FakeLLMWithResponses(FakeLLM):
         def invoke(self, _messages):
             return next(responses)
 
-    monkeypatch.setattr(redteam_module, "get_llm", lambda *_args, **_kwargs: FakeLLM())
+    monkeypatch.setattr(redteam_module, "get_llm", lambda *_args, **_kwargs: _FakeLLMWithResponses())
 
     node = RedteamNode(judge_model="gpt-4o-mini")
     result = node.run(generation=Item(text="Neutral response", tokens=5.0))
@@ -117,11 +123,11 @@ def test_run_merges_custom_metrics_with_defaults(monkeypatch: pytest.MonkeyPatch
         ]
     )
 
-    class FakeLLM:
+    class _FakeLLMWithResponses(FakeLLM):
         def invoke(self, _messages):
             return next(responses)
 
-    monkeypatch.setattr(redteam_module, "get_llm", lambda *_args, **_kwargs: FakeLLM())
+    monkeypatch.setattr(redteam_module, "get_llm", lambda *_args, **_kwargs: _FakeLLMWithResponses())
 
     node = RedteamNode(judge_model="gpt-4o-mini")
     custom = Redteam(
@@ -184,7 +190,7 @@ def test_estimate_returns_nonzero_cost_for_default_metrics() -> None:
 def test_parallel_and_serial_runs_preserve_metric_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class FakeLLM:
+    class _FakeLLMWithMetricLogic(FakeLLM):
         def invoke(self, messages):
             content = messages[1]["content"]
             if "Metric name:\nbias" in content:
@@ -215,7 +221,7 @@ def test_parallel_and_serial_runs_preserve_metric_order(
                 "model": "gpt-4o-mini",
             }
 
-    monkeypatch.setattr(redteam_module, "get_llm", lambda *_args, **_kwargs: FakeLLM())
+    monkeypatch.setattr(redteam_module, "get_llm", lambda *_args, **_kwargs: _FakeLLMWithMetricLogic())
 
     custom = Redteam(
         metrics=[
