@@ -162,6 +162,56 @@ def test_node_eval_is_orchestration_only(graph_module) -> None:
     assert graph_module.node_eval({}) == {}
 
 
+def test_node_eval_collects_metric_rows_for_cli_aggregation(
+    make_metric: Callable[[str, float, MetricCategory], MetricResult],
+    graph_module,
+) -> None:
+    state = {
+        "grounding_metrics": GroundingMetrics(
+            metrics=[make_metric("grounding", 1.0, MetricCategory.ANSWER)],
+            cost=_ZERO_COST,
+        ),
+        "relevance_metrics": RelevanceMetrics(
+            metrics=[make_metric("answer_relevancy", 0.9, MetricCategory.ANSWER)],
+            cost=_ZERO_COST,
+        ),
+        "redteam_metrics": RedteamMetrics(
+            metrics=[make_metric("vulnerability_prompt_injection", 0.2, MetricCategory.ANSWER)],
+            cost=_ZERO_COST,
+        ),
+        "geval_metrics": GevalMetrics(
+            metrics=[make_metric("geval_coherence", 0.7, MetricCategory.ANSWER)],
+            cost=_ZERO_COST,
+        ),
+        "reference_metrics": ReferenceMetrics(
+            metrics=[make_metric("rouge_l", 0.6, MetricCategory.RETRIEVAL)],
+            cost=_ZERO_COST,
+        ),
+    }
+
+    eval_out = graph_module.node_eval(state)
+    summary = eval_out["eval_summary"]
+    rows = summary["metric_rows"]
+
+    assert summary["schema_version"] == 1
+    assert len(rows) == 5
+    assert {row["source_node"] for row in rows} == {
+        "grounding",
+        "relevance",
+        "redteam",
+        "geval",
+        "reference",
+    }
+    assert {row["metric_name"] for row in rows} == {
+        "grounding",
+        "answer_relevancy",
+        "vulnerability_prompt_injection",
+        "geval_coherence",
+        "rouge_l",
+    }
+    assert all("verdict" in row for row in rows)
+
+
 def test_report_for_grounding_target_includes_inputs_and_branch_nodes(graph_module) -> None:
     """Verify grounding-target report includes input fields and expected grounding/claims sections.
 

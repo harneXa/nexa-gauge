@@ -138,7 +138,6 @@ class CachedNodeRunner:
 
     def run_case(
         self,
-        *,
         case: dict[str, Any],
         node_name: str,
         plan_context: _RunPlanContext | None = None,
@@ -146,7 +145,73 @@ class CachedNodeRunner:
         execution_mode: str = "run",
         debug: bool = False,
     ) -> CachedNodeRunResult:
+        """Execute one case through the planned node DAG up to ``node_name``.
+
+        Parallelism model inside a single case:
+        - Independent ready nodes can run concurrently in worker threads.
+        - Each submitted node receives a ``deepcopy(state)`` snapshot, so node
+          functions never share a mutable state object while running.
+        - Node outputs are merged back into canonical ``state`` only by this
+          scheduler thread, and only in plan order.
+
+        State consistency model:
+        - Concurrent node execution is based on immutable snapshots.
+        - Merge order is deterministic (plan index), so downstream nodes observe
+          stable state regardless of completion race timing.
+        - Final ``state`` is the ordered composition of all resolved patches.
+
+        For Eval Node:
+        --------------
+        plan_ctx = _RunPlanContext(
+            node_name='eval',
+            plan=('scan', 'chunk', 'claims', 'dedup', 'geval_steps', 'relevance', 'grounding', 'redteam', 'geval', 'reference', 'eval', 'report'),
+            plan_index={'scan': 0, 'chunk': 1, 'claims': 2, 'dedup': 3, 'geval_steps': 4, 'relevance': 5, 'grounding': 6, 'redteam': 7, 'geval': 8, 'reference': 9, 'eval': 10, 'report': 11},
+            direct_prereqs={
+                'scan': (),
+                'chunk': ('scan',),
+                'claims': ('chunk',),
+                'dedup': ('claims',),
+                'geval_steps': ('scan',),
+                'relevance': ('dedup',),
+                'grounding': ('dedup',),
+                'redteam': ('scan',),
+                'geval': ('geval_steps',),
+                'reference': ('scan',),
+                'eval': ('chunk', 'claims', 'dedup', 'geval_steps', 'relevance', 'grounding', 'redteam', 'geval', 'reference'),
+                'report': ('eval',)
+            },
+            dependents={
+                'scan': ('chunk', 'geval_steps', 'redteam', 'reference'),
+                'chunk': ('claims', 'eval'),
+                'claims': ('dedup', 'eval'),
+                'dedup': ('relevance', 'grounding', 'eval'),
+                'geval_steps': ('geval', 'eval'),
+                'relevance': ('eval',),
+                'grounding': ('eval',),
+                'redteam': ('eval',),
+                'geval': ('eval',),
+                'reference': ('eval',),
+                'eval': ('report',),
+                'report': ()
+            }, plan_transitive_prereqs={
+                'scan': (),
+                'chunk': ('scan',),
+                'claims': ('scan', 'chunk'),
+                'dedup': ('scan', 'chunk', 'claims'),
+                'geval_steps': ('scan',),
+                'relevance': ('scan', 'chunk', 'claims', 'dedup'),
+                'grounding': ('scan', 'chunk', 'claims', 'dedup'),
+                'redteam': ('scan',),
+                'geval': ('scan', 'geval_steps'),
+                'reference': ('scan',),
+                'eval': ('scan', 'chunk', 'claims', 'dedup', 'geval_steps', 'relevance', 'grounding', 'redteam', 'geval', 'reference'),
+                'report': ('scan', 'chunk', 'claims', 'dedup', 'geval_steps', 'relevance', 'grounding', 'redteam', 'geval', 'reference', 'eval')
+            }
+        )
+        """
+        # When running for cli with many datapoints `_build_run_plan_context` is prebuild in run_cases_iter
         plan_ctx = plan_context or self._build_run_plan_context(node_name=node_name)
+
         if plan_ctx.node_name != node_name:
             raise ValueError(
                 f"Plan context node '{plan_ctx.node_name}' does not match requested '{node_name}'."
@@ -161,6 +226,10 @@ class CachedNodeRunner:
         dependents = plan_ctx.dependents
         plan_transitive_prereqs = plan_ctx.plan_transitive_prereqs
 
+        # - state is the one “source of truth” dict for that case inside run_case.
+        # - Worker threads do not edit that shared dict.
+        # - Each worker gets deepcopy(state) (its own private snapshot), runs a node, and returns a patch.
+        # - Only the scheduler thread merges patches back into canonical state in order.
         state: EvalCase = _build_initial_state(
             case,
             execution_mode=execution_mode,
@@ -197,6 +266,10 @@ class CachedNodeRunner:
         node_output: dict[str, Any] = {}
         node_timings: dict[str, float] = {}
 
+        # Scheduler bookkeeping:
+        # - remaining_prereqs drives readiness in the DAG
+        # - completed_outputs buffers finished node patches
+        # - emit_index enforces deterministic in-order merge into canonical state
         remaining_prereqs = {step: len(direct_prereqs[step]) for step in plan}
         ready: set[str] = {step for step, count in remaining_prereqs.items() if count == 0}
         submitted: set[str] = set()
@@ -206,24 +279,36 @@ class CachedNodeRunner:
         emit_index = 0
 
         def _drain_in_order_merges() -> None:
+            """Merge completed node patches into shared state in plan order.
+
+            Workers can finish at different times, but we only apply their
+            outputs to the main case state in the original DAG order. This
+            keeps final state deterministic and avoids race-order behavior.
+            """
             nonlocal emit_index, node_output
             while emit_index < len(plan):
                 step_name = plan[emit_index]
                 output = completed_outputs.get(step_name)
                 if output is None:
                     break
+                # Merge only in plan order; this removes race-induced nondeterminism.
                 _merge_state_patch(state, output)
                 if step_name == node_name:
                     node_output = output
                 emit_index += 1
 
         def _resolve_step(
-            *,
             step_name: str,
             output: dict[str, Any],
             was_cached: bool,
             elapsed_ms: float,
         ) -> None:
+            """Finalize one step and propagate readiness to dependents.
+
+            This marks a node as done, records cache/timing metadata, optionally
+            writes fresh output to cache, and decrements prerequisite counters so
+            downstream nodes can become runnable.
+            """
             completed_outputs[step_name] = output
             resolved.add(step_name)
 
@@ -256,10 +341,12 @@ class CachedNodeRunner:
         def _timed_step_run(
             step_name: str, snapshot: dict[str, Any]
         ) -> tuple[dict[str, Any], float]:
+            # Node function reads from an isolated snapshot and returns a patch.
             node_t0 = time.monotonic()
             out = NODE_FNS[step_name](snapshot)
             return out, (time.monotonic() - node_t0) * 1000
 
+        # Run all the nodes in parallel
         case_workers = max(4, len(METRIC_NODES))
         with ThreadPoolExecutor(max_workers=case_workers) as pool:
             while len(resolved) < len(plan):
@@ -270,6 +357,7 @@ class CachedNodeRunner:
                     (step for step in ready if step not in resolved and step not in submitted),
                     key=lambda step: plan_index[step],
                 )
+
                 for step in ready_now:
                     ready.discard(step)
                     cached_output = self._read_step_cache_if_allowed(
@@ -278,6 +366,9 @@ class CachedNodeRunner:
                         execution_mode=execution_mode,
                         force=force,
                     )
+
+                    # If we have cached output, we simply continue
+                    # and not add it to the thread pool
                     if cached_output is not None:
                         _resolve_step(
                             step_name=step,
@@ -290,6 +381,7 @@ class CachedNodeRunner:
 
                     if debug:
                         _debug_log_running(step, case_id_for_log)
+                    # Snapshot-per-node: concurrent workers do not share mutable state.
                     future = pool.submit(_timed_step_run, step, deepcopy(state))
                     in_flight[future] = step
                     submitted.add(step)
@@ -333,7 +425,6 @@ class CachedNodeRunner:
 
     def run_cases_iter(
         self,
-        *,
         cases: Iterable[dict[str, Any]],
         node_name: str,
         force: bool = False,
@@ -342,7 +433,13 @@ class CachedNodeRunner:
         max_in_flight: int | None = None,
         continue_on_error: bool = True,
         debug: bool = False,
+        eval_collector: Any | None = None,
     ) -> Iterator[CaseRunOutcome]:
+        def _ingest_eval_summary_if_enabled(result: CachedNodeRunResult) -> None:
+            if eval_collector is None:
+                return
+            eval_collector.ingest_final_state(result.final_state)
+
         plan_context = self._build_run_plan_context(node_name=node_name)
         workers = max(1, max_workers)
         in_flight_limit = self._normalize_max_in_flight(
@@ -362,6 +459,7 @@ class CachedNodeRunner:
                         execution_mode=execution_mode,
                         debug=debug,
                     )
+                    _ingest_eval_summary_if_enabled(result)
                     yield CaseRunOutcome(index=idx, case_id=result.case_id, result=result)
                 except Exception as exc:
                     yield CaseRunOutcome(
@@ -427,6 +525,7 @@ class CachedNodeRunner:
                 while True:
                     if emit_index in buffered_results:
                         result = buffered_results.pop(emit_index)
+                        _ingest_eval_summary_if_enabled(result)
                         yield CaseRunOutcome(
                             index=emit_index, case_id=result.case_id, result=result
                         )
@@ -453,6 +552,7 @@ class CachedNodeRunner:
             while True:
                 if emit_index in buffered_results:
                     result = buffered_results.pop(emit_index)
+                    _ingest_eval_summary_if_enabled(result)
                     yield CaseRunOutcome(index=emit_index, case_id=result.case_id, result=result)
                     emit_index += 1
                     continue

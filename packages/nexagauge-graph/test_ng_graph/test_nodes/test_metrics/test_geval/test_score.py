@@ -100,6 +100,7 @@ def test_successful_scoring_with_logprobs(
     assert m.score is not None
     assert 0.0 < m.score < 1.0
     assert abs(m.score - (6.9 - 1) / 9) < 1e-9
+    assert m.verdict == "PASSED"
     assert result.cost is not None
     assert result.cost.input_tokens == 120
     assert result.cost.output_tokens == 30
@@ -127,6 +128,7 @@ def test_successful_scoring_without_logprobs(
     m = result.metrics[0]
     assert m.score is not None
     assert abs(m.score - (7 - 1) / 9) < 1e-9
+    assert m.verdict == "PASSED"
 
 
 def test_missing_required_fields(
@@ -150,6 +152,7 @@ def test_missing_required_fields(
     assert m.score is None
     assert m.error is not None
     assert "generation" in m.error
+    assert m.verdict is None
     assert fake.captured_messages == []
 
 
@@ -173,13 +176,14 @@ def test_parse_error_yields_metric_error(
     assert m.score is None
     assert m.error is not None
     assert "bad json" in m.error
+    assert m.verdict is None
 
 
 def test_pass_threshold_boundary(
     monkeypatch: pytest.MonkeyPatch,
     resolved_artifacts: list[GevalStepsResolved],
 ) -> None:
-    # Raw score 6, no logprobs → normalized = (6-1)/9 ≈ 0.5556 → passed.
+    # Raw score 6, no logprobs → normalized = (6-1)/9 ≈ 0.5556 → not passed at 0.6 threshold.
     fake = FakeLLM(parsed=_GevalScoreResponse(score=6, reason="borderline"), logprobs=None)
     _install_fake_llm(monkeypatch, fake)
 
@@ -192,7 +196,8 @@ def test_pass_threshold_boundary(
         context=None,
     )
     entry = result.metrics[0].result[0]
-    assert entry["passed"] is True
+    assert entry["passed"] is False
+    assert result.metrics[0].verdict == "FAILED"
 
     # Raw score 5 → normalized ≈ 0.444 → not passed.
     fake2 = FakeLLM(parsed=_GevalScoreResponse(score=5, reason="weak"), logprobs=None)
@@ -208,6 +213,7 @@ def test_pass_threshold_boundary(
     )
     entry2 = result2.metrics[0].result[0]
     assert entry2["passed"] is False
+    assert result2.metrics[0].verdict == "FAILED"
 
 
 def test_prompt_contains_evaluation_steps(

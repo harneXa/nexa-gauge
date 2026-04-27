@@ -48,6 +48,7 @@ def test_run_returns_metric_and_cost_with_mocked_llm(monkeypatch: pytest.MonkeyP
     metric = result.metrics[0]
     assert metric.name == "answer_relevancy"
     assert metric.score == 0.5
+    assert metric.verdict == "FAILED"
 
     assert result.cost.input_tokens == 110
     assert result.cost.output_tokens == 20
@@ -89,4 +90,5 @@ def test_run_handles_no_verdicts_as_error_metric(monkeypatch: pytest.MonkeyPatch
 
     assert len(result.metrics) == 1
     assert result.metrics[0].error == "No verdicts returned"
+    assert result.metrics[0].verdict is None
     assert result.cost.input_tokens == 90

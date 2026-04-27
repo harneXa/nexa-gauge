@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import ng_cli.main as main_module
+import ng_cli.run as run_module
 import pytest
 from ng_cli.main import (
     DEFAULT_FALLBACK_LLM,
@@ -620,3 +622,173 @@ def test_run_debug_summary_uses_per_node_eligible_counts(
     eligible_counts = captured_summary["eligible_counts_by_node"]
     assert eligible_counts["scan"] == 2
     assert eligible_counts["grounding"] == 1
+
+
+def test_run_command_passes_eval_collector_and_renders_from_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _Adapter:
+        def iter_cases(self, split: str = "train", limit: int | None = None):
+            del split, limit
+            yield {"case_id": "c1", "generation": "hello"}
+
+    class _Runner:
+        def __init__(self, cache_store):
+            del cache_store
+
+        def run_cases_iter(self, **kwargs):
+            collector = kwargs.get("eval_collector")
+            assert collector is not None
+            captured["collector"] = collector
+            collector.ingest_final_state(
+                {
+                    "eval_summary": {
+                        "metric_rows": [
+                            {
+                                "source_node": "grounding",
+                                "metric_name": "grounding",
+                                "score": 0.8,
+                                "error": None,
+                                "weight": 1.0,
+                            }
+                        ]
+                    }
+                }
+            )
+            for case in kwargs["cases"]:
+                yield SimpleNamespace(
+                    case_id=case["case_id"],
+                    error=None,
+                    result=SimpleNamespace(
+                        case_id=case["case_id"],
+                        executed_nodes=["scan"],
+                        cached_nodes=[],
+                        final_state={},
+                        node_timings={},
+                    ),
+                )
+
+    def _capture_tables(summary):
+        captured["summary"] = summary
+        return []
+
+    monkeypatch.setattr(main_module, "create_dataset_adapter", lambda **kwargs: _Adapter())
+    monkeypatch.setattr(main_module, "CachedNodeRunner", _Runner)
+    monkeypatch.setattr("ng_cli.run.eval_node.build_eval_summary_tables", _capture_tables)
+
+    main_module.run(
+        node_name="eval",
+        input="dummy.json",
+        split="train",
+        start=0,
+        end=None,
+        limit=1,
+        adapter="auto",
+        hf_config=None,
+        hf_revision=None,
+        judge_model=DEFAULT_PRIMARY_LLM,
+        llm_model=[],
+        llm_fallback=[],
+        yes=False,
+        continue_on_error=True,
+        max_workers=1,
+        max_in_flight=None,
+        force=False,
+        no_cache=True,
+        cache_dir=None,
+        output_dir=None,
+    )
+
+    assert isinstance(captured["collector"], run_module.eval_node.EvalBatchCollector)
+    summary = captured["summary"]
+    assert isinstance(summary, dict)
+    assert summary["cases_with_eval"] == 1
+    assert "grounding" in summary["by_node"]
+
+
+def test_run_command_writes_case_report_and_metric_breakdowns(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    out_dir = tmp_path / "report_out"
+
+    class _Adapter:
+        def iter_cases(self, split: str = "train", limit: int | None = None):
+            del split, limit
+            yield {"case_id": "c1", "generation": "hello"}
+
+    class _Runner:
+        def __init__(self, cache_store):
+            del cache_store
+
+        def run_cases_iter(self, **kwargs):
+            collector = kwargs.get("eval_collector")
+            assert collector is not None
+            collector.ingest_final_state(
+                {
+                    "eval_summary": {
+                        "metric_rows": [
+                            {
+                                "source_node": "grounding",
+                                "metric_name": "grounding",
+                                "score": 0.75,
+                                "error": None,
+                                "weight": 1.0,
+                            }
+                        ]
+                    }
+                }
+            )
+            for case in kwargs["cases"]:
+                yield SimpleNamespace(
+                    case_id=case["case_id"],
+                    error=None,
+                    result=SimpleNamespace(
+                        case_id=case["case_id"],
+                        executed_nodes=["scan"],
+                        cached_nodes=[],
+                        final_state={"report": {"target_node": "eval", "input": {"case_id": "c1"}}},
+                        node_timings={},
+                    ),
+                )
+
+    monkeypatch.setattr(main_module, "create_dataset_adapter", lambda **kwargs: _Adapter())
+    monkeypatch.setattr(main_module, "CachedNodeRunner", _Runner)
+
+    main_module.run(
+        node_name="eval",
+        input="dummy.json",
+        split="train",
+        start=0,
+        end=None,
+        limit=1,
+        adapter="auto",
+        hf_config=None,
+        hf_revision=None,
+        judge_model=DEFAULT_PRIMARY_LLM,
+        llm_model=[],
+        llm_fallback=[],
+        yes=False,
+        continue_on_error=True,
+        max_workers=1,
+        max_in_flight=None,
+        force=False,
+        no_cache=True,
+        cache_dir=None,
+        output_dir=out_dir,
+    )
+
+    case_report_file = out_dir / "case_report" / "c1.json"
+    metrics_file = out_dir / "metrics" / "grounding.json"
+
+    assert case_report_file.exists()
+    assert metrics_file.exists()
+
+    case_report = json.loads(case_report_file.read_text())
+    metrics_report = json.loads(metrics_file.read_text())
+
+    assert case_report["target_node"] == "eval"
+    assert metrics_report["node"] == "grounding"
+    assert metrics_report["summary"]["avg_score"] == pytest.approx(0.75)

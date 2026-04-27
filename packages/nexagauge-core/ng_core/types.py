@@ -11,16 +11,6 @@ from pydantic import BaseModel, Field, model_validator
 
 ExecutionMode = Literal["run", "estimate"]
 
-# ── Enums ──────────────────────────────────────────────────────────────────
-
-
-class ClaimVerdict(str, Enum):
-    """Verdict from the grounding/faithfulness judge for a single claim."""
-
-    SUPPORTED = "SUPPORTED"
-    CONTRADICTED = "CONTRADICTED"
-    UNVERIFIABLE = "UNVERIFIABLE"
-
 
 class EvidenceSource(str, Enum):
     """Where evidence for a claim was retrieved from."""
@@ -54,6 +44,19 @@ class GevalMetricSpec(BaseModel):
     evaluation_steps: list[str] = Field(default_factory=list)
 
 
+class GevalMetricInput(BaseModel):
+    """One GEval metric as the scanner emits it onto an ``Inputs`` payload.
+
+    ``evaluation_steps`` may be empty — in that case ``GevalStepsNode``
+    generates them from ``criteria`` and caches by signature.
+    """
+
+    name: str
+    item_fields: list[GevalItemField] = Field(default_factory=lambda: ["generation"])
+    criteria: Item | None = None
+    evaluation_steps: list[Item]
+
+
 class GevalConfig(BaseModel):
     """Legacy GEval config shape used by cache/tests/adapters."""
 
@@ -79,17 +82,85 @@ class Item(BaseModel):
             self.id = hashlib.sha256(self.text.encode("utf-8")).hexdigest()[:16]
 
 
-class GevalMetricInput(BaseModel):
-    """One GEval metric as the scanner emits it onto an ``Inputs`` payload.
+class Chunk(BaseModel):
+    """One span of the generation after chunking, with offsets back to source."""
 
-    ``evaluation_steps`` may be empty — in that case ``GevalStepsNode``
-    generates them from ``criteria`` and caches by signature.
+    index: int
+    item: Item
+    char_start: int
+    char_end: int
+    sha256: str
+
+
+# --------------------------------------------------------------------------------
+# RAGAS
+# --------------------------------------------------------------------------------
+
+
+class Claim(BaseModel):
+    """Atomic factual claim extracted from a chunk; feeds grounding/relevance."""
+
+    item: Item
+    source_chunk_index: Optional[int] = None
+    confidence: float = 1.0
+    extraction_failed: bool = False
+
+
+class Grounding(Claim):
+    """Claim annotated with a Grounding verdict against retrieved evidence."""
+
+    verdict: Literal["ACCEPTED", "REJECTED"]
+
+
+class Relevancy(Claim):
+    """Claim annotated with a relevancy verdict against the question."""
+
+    verdict: Literal["ACCEPTED", "REJECTED"]
+
+
+class RedTeamVerdict(str, Enum):
+    """Canonical redteam safety verdict.
+
+    Values are stored in uppercase for consistency in reports and downstream
+    consumers. Use ``parse`` to normalize model output that may come as
+    lowercase/mixed-case text.
+    """
+
+    SAFE = "SAFE"
+    UNSAFE = "UNSAFE"
+
+    @classmethod
+    def parse(cls, value: "RedTeamVerdict | str") -> "RedTeamVerdict":
+        if isinstance(value, cls):
+            return value
+        normalized = str(value).strip().upper()
+        try:
+            return cls(normalized)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid RedTeamVerdict '{value}'. Expected one of: SAFE, UNSAFE."
+            ) from exc
+
+
+class MetricResult(BaseModel):
+    """One row in a metric node output.
+
+    ``result`` stores raw metric-native artifacts (claim verdicts, rubric details,
+    judge reasoning, etc.). ``verdict`` stores a high-level outcome suitable for
+    aggregation/reporting; ``None`` means no pass/fail judgment is available.
     """
 
     name: str
-    item_fields: list[GevalItemField] = Field(default_factory=lambda: ["generation"])
-    criteria: Item | None = None
-    evaluation_steps: list[Item]
+    category: MetricCategory
+    score: float | None = None
+    verdict: str | None = None
+    result: list[Any] | None = None
+    error: str | None = None
+
+
+# --------------------------------------------------------------------------------
+# Geval
+# --------------------------------------------------------------------------------
 
 
 class Geval(BaseModel):
@@ -118,47 +189,6 @@ class Redteam(BaseModel):
     """Input contract for redteam metric configuration."""
 
     metrics: list[RedteamMetricInput] = Field(default_factory=list)
-
-
-class Chunk(BaseModel):
-    """One span of the generation after chunking, with offsets back to source."""
-
-    index: int
-    item: Item
-    char_start: int
-    char_end: int
-    sha256: str
-
-
-class Claim(BaseModel):
-    """Atomic factual claim extracted from a chunk; feeds grounding/relevance."""
-
-    item: Item
-    source_chunk_index: Optional[int] = None
-    confidence: float = 1.0
-    extraction_failed: bool = False
-
-
-class MetricResult(BaseModel):
-    """One row in a metric node's output — score plus optional per-item detail."""
-
-    name: str
-    category: MetricCategory
-    score: float | None = None
-    result: list[Any] | None = None
-    error: str | None = None
-
-
-class Faithfulness(Claim):
-    """Claim annotated with a faithfulness verdict against retrieved evidence."""
-
-    verdict: Literal["ACCEPTED", "REJECTED"]
-
-
-class Relevancy(Claim):
-    """Claim annotated with a relevancy verdict against the question."""
-
-    verdict: Literal["ACCEPTED", "REJECTED"]
 
 
 class Inputs(BaseModel):

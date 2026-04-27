@@ -6,6 +6,7 @@ from ng_core.constants import (
     AVG_CLAIM_INPUT_TOKENS,
     AVG_CLAIM_OUTPUT_TOKENS_BOOLEAN_VERDICT,
     AVG_CLAIMS_PER_CHUNK,
+    RELEVANCE_METRIC_PASS_THRESHOLD,
 )
 from ng_core.types import (
     Claim,
@@ -21,6 +22,7 @@ from ng_graph.llm.gateway import get_llm
 from ng_graph.llm.pricing import cost_usd, get_model_pricing
 from ng_graph.log import get_node_logger
 from ng_graph.nodes.base import BaseMetricNode
+from ng_graph.nodes.metrics.verdicts import verdict_from_score
 from pydantic import BaseModel
 
 log = get_node_logger("relevance")
@@ -97,6 +99,7 @@ class RelevanceNode(BaseMetricNode):
                 name="answer_relevancy",
                 category=MetricCategory.ANSWER,
                 score=score,
+                verdict=verdict_from_score(score, RELEVANCE_METRIC_PASS_THRESHOLD),
                 result=per_claim,
             ),
             cost,

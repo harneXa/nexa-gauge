@@ -24,7 +24,7 @@ from ng_core.constants import (
     AVG_DEEPEVAL_OUTPUT_REASONING_TOKENS,
     AVG_DEEPEVAL_OUTPUT_VERDICT,
     AVG_DEEPEVAL_PROMPT_TOKENS,
-    METRIC_PASS_THRESHOLD,
+    GEVAL_METRIC_PASS_THRESHOLD,
 )
 from ng_core.types import (
     CostEstimate,
@@ -46,6 +46,7 @@ from ng_graph.nodes.metrics.geval.cache import (
 )
 from ng_graph.nodes.metrics.geval.fields import FIELD_DISPLAY_NAMES, format_param_names
 from ng_graph.nodes.metrics.geval.weighted_score import calculate_weighted_summed_score
+from ng_graph.nodes.metrics.verdicts import verdict_from_score
 from pydantic import BaseModel, Field
 
 log = get_node_logger("geval")
@@ -268,13 +269,14 @@ class GevalNode(BaseMetricNode):
 
         normalized = (weighted - _SCORE_MIN) / (_SCORE_MAX - _SCORE_MIN)
         normalized = max(0.0, min(1.0, normalized))
-        passed = normalized >= METRIC_PASS_THRESHOLD
+        passed = normalized >= GEVAL_METRIC_PASS_THRESHOLD
 
         return _EvaluationResult(
             metric=MetricResult(
                 name=metric.name,
                 category=MetricCategory.ANSWER,
                 score=normalized,
+                verdict=verdict_from_score(normalized, GEVAL_METRIC_PASS_THRESHOLD),
                 result=[
                     {
                         "passed": passed,
