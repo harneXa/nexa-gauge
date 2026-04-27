@@ -29,6 +29,7 @@ from ng_core.types import (
 
 from .llm import get_judge_model
 from .nodes import claim_extractor, report
+from .nodes import eval as eval_node
 from .nodes.chunk_extractor import ChunkExtractorNode
 from .nodes.dedup import DedupNode
 from .nodes.metrics.geval import GevalNode, GevalStepsNode
@@ -424,17 +425,7 @@ def node_reference(state: EvalCase) -> dict[str, Any]:
 
 
 def node_eval(state: EvalCase) -> dict[str, Any]:
-    # Orchestration-only join node. Final aggregation happens in node_report.
-    return {}
-
-
-def _unwrap_metrics(value: Any) -> list[Any]:
-    """Accept either a wrapper object with .metrics or a plain list of MetricResult."""
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return value
-    return list(getattr(value, "metrics", None) or [])
+    return eval_node.node_eval(state)
 
 
 def node_report(state: EvalCase) -> dict[str, Any]:

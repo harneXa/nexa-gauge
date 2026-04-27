@@ -62,10 +62,6 @@ AVG_CLAIMS_PER_CHUNK: int = 2  # Average number of claims extracted per chunk
 # Average output tokens for a single boolean verdict (grounding): "true"/"false".
 AVG_CLAIM_OUTPUT_TOKENS_BOOLEAN_VERDICT: int = 7
 
-# Average output tokens for a single JSON relevance verdict:
-# {"verdict": "relevant"} is ~10 tokens.
-AVG_OUTPUT_TOKENS_JSON_VERDICT: int = 10
-
 # DeepEval BiasMetric / ToxicityMetric each make internal LLM calls whose
 # prompts are not directly accessible. These constants approximate that overhead.
 AVG_DEEPEVAL_PROMPT_TOKENS: int = 100
@@ -74,8 +70,6 @@ AVG_DEEPEVAL_OUTPUT_VERDICT: int = 14
 
 
 # DeepEval GEval constructs a multi-step evaluation prompt per metric.
-AVG_GEVAL_INPUT_OVERHEAD_TOKENS: int = 400
-AVG_GEVAL_OUTPUT_OVERHEAD_TOKENS: int = 60
 AVG_DEEPEVAL_GEVAL_CRITERIA_STEPS: int = 3
 AVG_DEEPEVAL_GEVAL_CRITERIA_STEP_TOKENS: int = 40
 
@@ -92,34 +86,19 @@ MMR_LAMBDA: float = 0.5
 
 # ── Evidence Retrieval ───────────────────────────────────────────────────────
 
-# Maximum number of passages returned per retrieval query.
-EVIDENCE_RETRIEVAL_TOP_K: int = 5
-
-# Maximum number of results requested from Tavily per web-search query.
-EVIDENCE_TAVILY_MAX_RESULTS: int = 5
-
 # Retrieval score (0–1) at or above which a claim is labelled SUPPORTED.
 # Also used as the default evidence_threshold in EvalJobConfig and Config.
 EVIDENCE_VERDICT_SUPPORTED_THRESHOLD: float = 0.75
-
-# Retrieval score at or above which a claim is labelled UNVERIFIABLE
-# (insufficient evidence).  Below this it is labelled CONTRADICTED.
-EVIDENCE_VERDICT_UNVERIFIABLE_THRESHOLD: float = 0.4
 
 # ── Metrics ──────────────────────────────────────────────────────────────────
 
 # Score at or above which a metric is considered "passed".
 # Applied uniformly to hallucination, GEval, and bias metrics.
-METRIC_PASS_THRESHOLD: float = 0.5
+GROUNDING_METRIC_PASS_THRESHOLD: float = 0.6  # Atleast 60% of claims should be supported
+RELEVANCE_METRIC_PASS_THRESHOLD: float = 0.6  # Atleast 60% of claims should be supported
+GEVAL_METRIC_PASS_THRESHOLD: float = 0.6
+REDTEAM_METRIC_PASS_THRESHOLD: float = 0.6
 
-# Composite score weights — must sum to 1.0.
-# Used as defaults in EvalJobConfig.score_weights.
-SCORE_WEIGHT_FAITHFULNESS: float = 0.25
-SCORE_WEIGHT_ANSWER_RELEVANCY: float = 0.20
-SCORE_WEIGHT_HALLUCINATION: float = 0.25
-SCORE_WEIGHT_GEVAL: float = 0.15
-SCORE_WEIGHT_SAFETY: float = 0.10
-SCORE_WEIGHT_EVIDENCE_SUPPORT_RATE: float = 0.05
 
 # ── LLM ──────────────────────────────────────────────────────────────────────
 

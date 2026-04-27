@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from ng_core.constants import GROUNDING_METRIC_PASS_THRESHOLD
 from ng_core.types import (
     Chunk,
     ChunkArtifacts,
@@ -34,6 +35,7 @@ from ng_core.types import (
     RelevanceMetrics,
 )
 from ng_graph.nodes import report
+from ng_graph.nodes.metrics.verdicts import verdict_from_score
 
 # ---------------------------------------------------------------------------
 # Fixture builders — each returns a realistic Pydantic object
@@ -48,11 +50,21 @@ def _cost(cost: float = 0.01, inp: float = 100.0, out: float = 20.0) -> CostEsti
     return CostEstimate(cost=cost, input_tokens=inp, output_tokens=out)
 
 
-def _metric(name: str, score: float = 0.85) -> MetricResult:
+def _metric(
+    name: str,
+    score: float = 0.85,
+    verdict: str | None = None,
+    derive_verdict: bool = True,
+) -> MetricResult:
     return MetricResult(
         name=name,
         category=MetricCategory.ANSWER,
         score=score,
+        verdict=(
+            verdict_from_score(score, GROUNDING_METRIC_PASS_THRESHOLD)
+            if derive_verdict and verdict is None
+            else verdict
+        ),
         result=[{"detail": "ok"}],
     )
 
@@ -119,7 +131,7 @@ def _geval() -> GevalMetrics:
 
 def _reference() -> ReferenceMetrics:
     return ReferenceMetrics(
-        metrics=[_metric("rouge_l", 0.6)],
+        metrics=[_metric("rouge_l", 0.6, derive_verdict=False)],
         cost=_cost(0.006, 60.0, 12.0),
     )
 
@@ -210,7 +222,7 @@ def test_only_grounding() -> None:
 
     # Grounding — metrics is now a list of dicts
     assert result["grounding"]["metrics"] == [
-        {"name": "grounding", "score": 1.0, "result": [{"detail": "ok"}]},
+        {"name": "grounding", "score": 1.0, "verdict": "PASSED", "result": [{"detail": "ok"}]},
     ]
     _assert_cost(result["grounding"]["cost"], 0.002, 20.0, 2.0)
 
@@ -243,7 +255,12 @@ def test_only_relevance() -> None:
     _assert_input(result)
 
     assert result["relevance"]["metrics"] == [
-        {"name": "answer_relevancy", "score": 0.9, "result": [{"detail": "ok"}]},
+        {
+            "name": "answer_relevancy",
+            "score": 0.9,
+            "verdict": "PASSED",
+            "result": [{"detail": "ok"}],
+        },
     ]
     _assert_cost(result["relevance"]["cost"], 0.003, 30.0, 5.0)
 
@@ -272,7 +289,12 @@ def test_only_geval() -> None:
     _assert_input(result)
 
     assert result["geval"]["metrics"] == [
-        {"name": "geval_coherence", "score": 0.7, "result": [{"detail": "ok"}]},
+        {
+            "name": "geval_coherence",
+            "score": 0.7,
+            "verdict": "PASSED",
+            "result": [{"detail": "ok"}],
+        },
     ]
     _assert_cost(result["geval"]["cost"], 0.005, 50.0, 10.0)
 
@@ -303,7 +325,12 @@ def test_only_redteam() -> None:
     _assert_input(result)
 
     assert result["redteam"]["metrics"] == [
-        {"name": "vulnerability_prompt_injection", "score": 0.2, "result": [{"detail": "ok"}]},
+        {
+            "name": "vulnerability_prompt_injection",
+            "score": 0.2,
+            "verdict": "FAILED",
+            "result": [{"detail": "ok"}],
+        },
     ]
     _assert_cost(result["redteam"]["cost"], 0.004, 40.0, 8.0)
 
@@ -341,10 +368,15 @@ def test_grounding_and_relevance() -> None:
     _assert_input(result)
 
     assert result["grounding"]["metrics"] == [
-        {"name": "grounding", "score": 1.0, "result": [{"detail": "ok"}]},
+        {"name": "grounding", "score": 1.0, "verdict": "PASSED", "result": [{"detail": "ok"}]},
     ]
     assert result["relevance"]["metrics"] == [
-        {"name": "answer_relevancy", "score": 0.9, "result": [{"detail": "ok"}]},
+        {
+            "name": "answer_relevancy",
+            "score": 0.9,
+            "verdict": "PASSED",
+            "result": [{"detail": "ok"}],
+        },
     ]
     _assert_cost(result["grounding"]["cost"], 0.002, 20.0, 2.0)
     _assert_cost(result["relevance"]["cost"], 0.003, 30.0, 5.0)
@@ -404,3 +436,5 @@ def test_full_eval() -> None:
         assert "cost" in cost
         assert "input_tokens" in cost
         assert "output_tokens" in cost
+
+    assert result["reference"]["metrics"][0]["verdict"] is None

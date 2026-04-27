@@ -75,11 +75,13 @@ def test_run_uses_default_bias_and_toxicity_metrics(monkeypatch: pytest.MonkeyPa
     assert all(m.category == MetricCategory.ANSWER for m in result.metrics)
     assert result.metrics[0].score == pytest.approx(1.0)
     assert result.metrics[1].score == pytest.approx(0.75)
+    assert result.metrics[0].verdict == "PASSED"
+    assert result.metrics[1].verdict == "PASSED"
     assert result.metrics[0].result is not None
-    assert result.metrics[0].result[0]["verdict"] == "safe"
+    assert result.metrics[0].result[0]["verdict"] == "SAFE"
     assert result.metrics[0].result[0]["severity"] == 1
     assert result.metrics[1].result is not None
-    assert result.metrics[1].result[0]["verdict"] == "safe"
+    assert result.metrics[1].result[0]["verdict"] == "SAFE"
     assert result.metrics[1].result[0]["severity"] == 2
 
     assert result.cost.input_tokens == pytest.approx(210.0)
@@ -162,10 +164,11 @@ def test_run_merges_custom_metrics_with_defaults(monkeypatch: pytest.MonkeyPatch
     )
 
     assert [m.name for m in result.metrics] == ["bias", "toxicity", "prompt_injection"]
+    assert [m.verdict for m in result.metrics] == ["FAILED", "PASSED", "FAILED"]
     assert result.metrics[0].result is not None
-    assert result.metrics[0].result[0]["verdict"] == "unsafe"
+    assert result.metrics[0].result[0]["verdict"] == "UNSAFE"
     assert result.metrics[2].result is not None
-    assert result.metrics[2].result[0]["verdict"] == "unsafe"
+    assert result.metrics[2].result[0]["verdict"] == "UNSAFE"
     assert result.cost.input_tokens == pytest.approx(290.0)
     assert result.cost.output_tokens == pytest.approx(80.0)
 

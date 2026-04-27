@@ -8,6 +8,7 @@ import pytest
 from ng_core.cache import CacheStore, NoOpCacheStore
 from ng_core.types import CostEstimate
 from ng_graph import runner as runner_module
+from ng_graph.nodes import eval as eval_node
 from ng_graph.runner import CachedNodeRunner
 
 
@@ -566,3 +567,119 @@ def test_eval_and_report_are_never_cache_hits(
     assert "report" in second.executed_nodes
     assert "eval" not in second.cached_nodes
     assert "report" not in second.cached_nodes
+
+
+def test_run_cases_iter_updates_eval_collector_in_serial(monkeypatch) -> None:
+    def _scan(state: dict) -> dict:
+        if state["record"]["case_id"] == "case-1":
+            raise RuntimeError("boom")
+        return {"scan_marker": "ok"}
+
+    def _eval(state: dict) -> dict:
+        case_id = state["record"]["case_id"]
+        return {
+            "eval_summary": {
+                "metric_rows": [
+                    {
+                        "source_node": "grounding",
+                        "metric_name": "grounding",
+                        "score": 0.7 if case_id == "case-0" else 0.9,
+                        "error": None,
+                        "weight": 1.0,
+                    }
+                ]
+            }
+        }
+
+    monkeypatch.setitem(runner_module.NODE_FNS, "scan", _scan)
+    monkeypatch.setitem(runner_module.NODE_FNS, "eval", _eval)
+    monkeypatch.setitem(runner_module.NODE_FNS, "report", lambda _state: {"report": []})
+
+    runner = CachedNodeRunner(cache_store=NoOpCacheStore())
+    collector = eval_node.EvalBatchCollector()
+    cases = [
+        {"case_id": "case-0", "generation": "hello"},
+        {"case_id": "case-1", "generation": "hello"},
+        {"case_id": "case-2", "generation": "hello"},
+    ]
+
+    outcomes = list(
+        runner.run_cases_iter(
+            cases=cases,
+            node_name="scan",
+            max_workers=1,
+            continue_on_error=True,
+            eval_collector=collector,
+        )
+    )
+
+    assert [o.case_id for o in outcomes] == ["case-0", "case-1", "case-2"]
+    assert outcomes[1].result is None
+    assert "boom" in (outcomes[1].error or "")
+
+    summary = collector.snapshot()
+    assert summary["cases_with_eval"] == 2
+    assert summary["total"]["metrics"] == 2
+    assert summary["by_node"]["grounding"]["metrics"] == 2
+    assert summary["by_node"]["grounding"]["avg_score"] == pytest.approx(0.8)
+
+
+def test_run_cases_iter_updates_eval_collector_in_parallel(monkeypatch) -> None:
+    delays = {"case-0": 0.08, "case-1": 0.01, "case-2": 0.05}
+
+    def _scan(state: dict) -> dict:
+        time.sleep(delays[state["record"]["case_id"]])
+        return {"scan_marker": "ok"}
+
+    def _eval(state: dict) -> dict:
+        case_id = state["record"]["case_id"]
+        base = {"case-0": 0.6, "case-1": 0.7, "case-2": 0.8}[case_id]
+        return {
+            "eval_summary": {
+                "metric_rows": [
+                    {
+                        "source_node": "grounding",
+                        "metric_name": "grounding",
+                        "score": base,
+                        "error": None,
+                        "weight": 1.0,
+                    },
+                    {
+                        "source_node": "reference",
+                        "metric_name": "rouge_l",
+                        "score": base + 0.1,
+                        "error": None,
+                        "weight": 1.0,
+                    },
+                ]
+            }
+        }
+
+    monkeypatch.setitem(runner_module.NODE_FNS, "scan", _scan)
+    monkeypatch.setitem(runner_module.NODE_FNS, "eval", _eval)
+    monkeypatch.setitem(runner_module.NODE_FNS, "report", lambda _state: {"report": []})
+
+    runner = CachedNodeRunner(cache_store=NoOpCacheStore())
+    collector = eval_node.EvalBatchCollector()
+    cases = [{"case_id": f"case-{i}", "generation": "hello"} for i in range(3)]
+
+    outcomes = list(
+        runner.run_cases_iter(
+            cases=cases,
+            node_name="scan",
+            max_workers=3,
+            max_in_flight=3,
+            continue_on_error=True,
+            eval_collector=collector,
+        )
+    )
+
+    assert [o.case_id for o in outcomes] == ["case-0", "case-1", "case-2"]
+    assert all(o.result is not None for o in outcomes)
+
+    summary = collector.snapshot()
+    assert summary["cases_with_eval"] == 3
+    assert summary["total"]["metrics"] == 6
+    assert summary["by_node"]["grounding"]["metrics"] == 3
+    assert summary["by_node"]["reference"]["metrics"] == 3
+    assert summary["by_metric"]["reference"]["rouge_l"]["avg_score"] == pytest.approx(0.8)

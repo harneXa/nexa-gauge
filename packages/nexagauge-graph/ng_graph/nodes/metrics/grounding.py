@@ -6,11 +6,12 @@ from ng_core.constants import (
     AVG_CLAIM_INPUT_TOKENS,
     AVG_CLAIM_OUTPUT_TOKENS_BOOLEAN_VERDICT,
     AVG_CLAIMS_PER_CHUNK,
+    GROUNDING_METRIC_PASS_THRESHOLD,
 )
 from ng_core.types import (
     Claim,
     CostEstimate,
-    Faithfulness,
+    Grounding,
     GroundingMetrics,
     Item,
     MetricCategory,
@@ -21,6 +22,7 @@ from ng_graph.llm.gateway import get_llm
 from ng_graph.llm.pricing import cost_usd, get_model_pricing
 from ng_graph.log import get_node_logger
 from ng_graph.nodes.base import BaseMetricNode
+from ng_graph.nodes.metrics.verdicts import verdict_from_score
 from pydantic import BaseModel
 
 log = get_node_logger("grounding")
@@ -83,7 +85,7 @@ class GroundingNode(BaseMetricNode):
         verdicts = result.verdicts[: len(claims)]
         score = sum(verdicts) / len(verdicts)
         claim_verdicts = [
-            Faithfulness(**claim.model_dump(), verdict="ACCEPTED" if verdict else "REJECTED")
+            Grounding(**claim.model_dump(), verdict="ACCEPTED" if verdict else "REJECTED")
             for claim, verdict in zip(claims, verdicts)
         ]
         return (
@@ -91,6 +93,7 @@ class GroundingNode(BaseMetricNode):
                 name=self.node_name,
                 category=MetricCategory.ANSWER,
                 score=score,
+                verdict=verdict_from_score(score, GROUNDING_METRIC_PASS_THRESHOLD),
                 result=claim_verdicts,
             ),
             cost,

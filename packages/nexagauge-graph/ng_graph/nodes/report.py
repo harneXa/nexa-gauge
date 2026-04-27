@@ -65,7 +65,7 @@ REPORT_VISIBILITY: dict[str, Any] = {
     "grounding": {
         "metrics": [
             "grounding_metrics.metrics[*]",
-            {"name": "name", "score": "score", "result": "result"},
+            {"name": "name", "score": "score", "verdict": "verdict", "result": "result"},
         ],
         "cost": {
             "cost": "grounding_metrics.cost.cost",
@@ -76,7 +76,7 @@ REPORT_VISIBILITY: dict[str, Any] = {
     "relevance": {
         "metrics": [
             "relevance_metrics.metrics[*]",
-            {"name": "name", "score": "score", "result": "result"},
+            {"name": "name", "score": "score", "verdict": "verdict", "result": "result"},
         ],
         "cost": {
             "cost": "relevance_metrics.cost.cost",
@@ -87,7 +87,7 @@ REPORT_VISIBILITY: dict[str, Any] = {
     "redteam": {
         "metrics": [
             "redteam_metrics.metrics[*]",
-            {"name": "name", "score": "score", "result": "result"},
+            {"name": "name", "score": "score", "verdict": "verdict", "result": "result"},
         ],
         "cost": {
             "cost": "redteam_metrics.cost.cost",
@@ -98,7 +98,7 @@ REPORT_VISIBILITY: dict[str, Any] = {
     "geval": {
         "metrics": [
             "geval_metrics.metrics[*]",
-            {"name": "name", "score": "score", "result": "result"},
+            {"name": "name", "score": "score", "verdict": "verdict", "result": "result"},
         ],
         "cost": {
             "cost": "geval_metrics.cost.cost",
@@ -109,7 +109,7 @@ REPORT_VISIBILITY: dict[str, Any] = {
     "reference": {
         "metrics": [
             "reference_metrics.metrics[*]",
-            {"name": "name", "score": "score", "result": "result"},
+            {"name": "name", "score": "score", "verdict": "verdict", "result": "result"},
         ],
         "cost": {
             "cost": "reference_metrics.cost.cost",
