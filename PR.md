@@ -1,10 +1,10 @@
-<!-- pr-snapshot: 4dabc7946a213a31abe60f43d913a88a602ed5c9 -->
+<!-- pr-snapshot: 7d06cf5959bee76fd51af25100ec83fc16b98736 -->
 
 # GEval split, unified cache, and package rename to `nexagauge`
 
 **Branch:** `geval-split` → `main`
 **Date:** 2026-04-19
-Updated: 2026-04-26
+Updated: 2026-04-28
 
 ## Summary
 
@@ -131,6 +131,28 @@ Splits the GEval metric node into `geval_steps`, `geval_score`, and `geval_weigh
 - `test_ng_graph/test_graph/test_end_metric_routes.py` additions (+50 LOC) and `test_runner_streaming.py` additions (+117 LOC) — verify eval summary integrates with end-metric routing and streaming emission.
 - `test_apps/test_ng_cli/test_llm_cli_interface.py` (+172 LOC) — exercises the new CLI summary output and threshold formatting.
 - Existing metric tests (`test_grounding`, `test_relevance`, `test_redteam`, `test_geval/test_score`, `test_report_aggregate`) updated for the standardized verdict shape.
+---
+
+### Updates since snapshot 4dabc79 (2026-04-28)
+
+**New Changes:**
+- **geval scoring bug fix (`runner/engine.py`):** Adds `_build_step_snapshot()` so a node executing in parallel sees the merged output of all transitive prerequisites, even when canonical `state` merge is blocked behind earlier plan-index nodes. Previously `geval_score` could run with an empty/stale `geval_steps` payload (in-order merge race), which silently produced 0ms / no-op scores. Geval now scores correctly under the multithreaded runner.
+- **CLI `delete` → `cache` namespace:** Replaces `apps/nexagauge-apps/ng_cli/delete.py` with `cache.py` exposing `nexagauge cache dir` and `nexagauge cache delete` (with `--cache-dir`, `--yes/-y`, `--dry-run`). Reports file count and human-readable size before wiping; refuses non-directory paths. Resolves cache root from explicit flag → `NEXAGAUGE_CACHE_DIR` env → `default_cache_dir()`.
+- **CLI `run` cleanup:** Removes deprecated `--yes/-y`, `--cache-dir`, and `--split` options. `CacheStore` now always uses the default-resolved cache directory; dataset adapters are no longer split-parameterized at the CLI surface.
+- **README rewrite:** Full professional rewrite of `README.md` (~367 lines changed) — adds tables, a pipeline diagram, and a prominent link to the harnexa.dev docs site.
+- **Release 0.1.4:** Release-please landed `v0.1.4` covering the eval-summary feature (#23); `pyproject.toml`, `.release-please-manifest.json`, and `CHANGELOG.md` bumped. Inbound merge from `main` brings in the release commit.
+- **CI simplification:** Drops the Conventional-Commits PR-title validation step from `.github/workflows/ci.yml`; release-please already gates the release-relevant titles.
+- **Sample dataset reordering:** `sample.json` moves the bias/toxicity hiring cases earlier in the file (no field changes).
+
+**Reason:**
+- The geval no-op was a real correctness regression introduced when the runner moved to parallel intra-case execution — the per-node snapshot has to be assembled from completed prerequisite outputs, not from canonical `state`, because plan-indexed merge ordering can lag.
+- A single `cache` namespace is a cleaner public surface than a top-level `delete` verb, and the new `cache dir` / `--dry-run` / size reporting make wipe operations safer and more discoverable. Removing `--yes`, `--cache-dir`, and `--split` from `run` retires interface debt that no longer matched the runtime.
+- The README had drifted from the shipped product naming and capabilities; a polished landing page matters now that the repo is public-facing and docs live at harnexa.dev.
+
+**New Tests:**
+- `test_apps/test_ng_cli/test_delete_cli.py` updated for the new `cache` command tree.
+- `test_graph/test_runner_streaming.py` (+70 LOC) adds coverage exercising the prerequisite-snapshot path in `engine.py`.
+- `test_apps/test_ng_cli/test_llm_cli_interface.py` trimmed (-18 LOC) to drop the removed `--yes` / `--cache-dir` / `--split` assertions.
 ---
 
 ## Notes for Reviewer
