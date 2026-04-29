@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6](https://github.com/harnexa/nexa-gauge/compare/v0.1.5...v0.1.6) (2026-04-29)
+
+
+### Dependencies
+
+* **deps:** bump amannn/action-semantic-pull-request from 5 to 6 ([#32](https://github.com/harnexa/nexa-gauge/issues/32)) ([e5330d3](https://github.com/harnexa/nexa-gauge/commit/e5330d38bd857f4ae3957a4dd0da06a88f68424f))
+
 ## [0.1.5](https://github.com/harnexa/nexa-gauge/compare/v0.1.4...v0.1.5) (2026-04-29)
 
 
