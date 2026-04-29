@@ -124,6 +124,7 @@ The CLI entry point is `nexagauge`.
 nexagauge --help
 nexagauge run --help
 nexagauge estimate --help
+nexagauge cache --help
 ```
 
 Primary commands:
@@ -132,7 +133,8 @@ Primary commands:
 | --- | --- |
 | `nexagauge estimate <target_node> --input <source>` | Estimate uncached cost for a target branch before execution. |
 | `nexagauge run <target_node> --input <source>` | Execute a target branch and optionally write reports. |
-| `nexagauge delete cache` | Inspect or clear cached node outputs. |
+| `nexagauge cache dir` | Print the resolved cache root directory. |
+| `nexagauge cache delete` | Inspect or clear cached node outputs. |
 
 Common examples:
 
@@ -147,16 +149,16 @@ nexagauge run eval --input sample.json --limit 100 --output-dir ./report
 nexagauge run grounding --input sample.json --limit 25
 
 # Preview cache cleanup
-nexagauge delete cache --dry-run
+nexagauge cache delete --dry-run
 ```
 
 Common flags:
 
 | Area | Flags |
 | --- | --- |
-| Data selection | `--input`, `--adapter`, `--split`, `--start`, `--end`, `--limit` |
+| Data selection | `--input`, `--adapter`, `--start`, `--end`, `--limit` |
 | Model routing | `--model`, `--llm-model`, `--llm-fallback` |
-| Caching | `--force`, `--no-cache`, `--cache-dir` |
+| Caching | `--force`, `--no-cache` |
 | Execution | `--max-workers`, `--max-in-flight`, `--llm-concurrency`, `--continue-on-error` |
 | Debugging | `--debug` |
 | Reports | `--output-dir` |
@@ -233,16 +235,23 @@ nexagauge run eval --input sample.json --limit 50 --no-cache
 
 The cache is deterministic and route-aware. Inputs, evaluation criteria, model routing, prompt versions, parser versions, and relevant upstream artifacts are included in cache keys so stale outputs are not reused across incompatible runs.
 
-Cache location can be controlled with:
+For `run`, cache location can be controlled with:
 
 ```bash
 export NEXAGAUGE_CACHE_DIR="./.nexagauge-cache"
 ```
 
-or per command:
+Inspect the active cache root:
 
 ```bash
-nexagauge run eval --input sample.json --cache-dir ./.nexagauge-cache
+nexagauge cache dir
+```
+
+Clear cached node outputs:
+
+```bash
+nexagauge cache delete --dry-run
+nexagauge cache delete --yes
 ```
 
 ---
