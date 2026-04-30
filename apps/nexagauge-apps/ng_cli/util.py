@@ -216,7 +216,6 @@ def _parse_model_overrides(
 def _resolve_runtime_llm_overrides(
     *,
     target_node: str,
-    legacy_model: str,
     llm_model_values: list[str] | tuple[str, ...] | None,
     llm_fallback_values: list[str] | tuple[str, ...] | None,
 ) -> tuple[str, dict[str, dict[str, str]], list[str]]:
@@ -232,17 +231,7 @@ def _resolve_runtime_llm_overrides(
     warnings.extend(model_warnings)
     warnings.extend(fallback_warnings)
 
-    if (
-        global_model_from_flag is not None
-        and legacy_model != DEFAULT_PRIMARY_LLM
-        and legacy_model != global_model_from_flag
-    ):
-        raise ValueError(
-            "Conflicting global model values from --model and --llm-model. "
-            "Use one global model or make them equal."
-        )
-
-    global_primary = global_model_from_flag or legacy_model or DEFAULT_PRIMARY_LLM
+    global_primary = global_model_from_flag or DEFAULT_PRIMARY_LLM
     global_fallback = global_fallback_from_flag or DEFAULT_FALLBACK_LLM
 
     branch_nodes = _plan_nodes_for_target(target_node)
@@ -419,7 +408,7 @@ def _collect_estimate_rows(
     node_stats: dict[str, dict[str, int]],
     total_selected_cases: int,
     successful_cases: int,
-    effective_judge_model: str,
+    effective_primary_model: str,
     llm_overrides: dict[str, dict[str, str]],
 ) -> list[tuple[str, str, str, str, str, str, str, float]]:
     rows: list[tuple[str, str, str, str, str, str, str, float]] = []
@@ -448,7 +437,7 @@ def _collect_estimate_rows(
         )
         resolved_model = get_judge_model(
             node_name=node_name,
-            default=effective_judge_model,
+            default=effective_primary_model,
             llm_overrides=llm_overrides,
         )
         rows.append(

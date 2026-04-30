@@ -57,7 +57,6 @@ def test_parse_model_overrides_rejects_unknown_node() -> None:
 def test_resolve_runtime_llm_overrides_uses_defaults_for_branch() -> None:
     _, overrides, warnings = _resolve_runtime_llm_overrides(
         target_node="grounding",
-        legacy_model=DEFAULT_PRIMARY_LLM,
         llm_model_values=(),
         llm_fallback_values=(),
     )
@@ -73,7 +72,6 @@ def test_resolve_runtime_llm_overrides_uses_defaults_for_branch() -> None:
 def test_resolve_runtime_llm_overrides_ignores_non_branch_node_with_warning() -> None:
     _, overrides, warnings = _resolve_runtime_llm_overrides(
         target_node="grounding",
-        legacy_model=DEFAULT_PRIMARY_LLM,
         llm_model_values=("relevance=openai/gpt-4o",),
         llm_fallback_values=(),
     )
@@ -82,22 +80,9 @@ def test_resolve_runtime_llm_overrides_ignores_non_branch_node_with_warning() ->
     assert "not in target branch 'grounding'" in warnings[0]
 
 
-def test_resolve_runtime_llm_overrides_rejects_legacy_global_conflict() -> None:
-    with pytest.raises(
-        ValueError, match="Conflicting global model values from --model and --llm-model"
-    ):
-        _resolve_runtime_llm_overrides(
-            target_node="grounding",
-            legacy_model="openai/gpt-4o",
-            llm_model_values=("openai/gpt-4o-mini",),
-            llm_fallback_values=(),
-        )
-
-
 def test_resolve_runtime_llm_overrides_applies_global_then_node_override() -> None:
     _, overrides, warnings = _resolve_runtime_llm_overrides(
         target_node="grounding",
-        legacy_model=DEFAULT_PRIMARY_LLM,
         llm_model_values=("openai/gpt-4o", "grounding=openai/gpt-4o-mini"),
         llm_fallback_values=(),
     )
@@ -126,7 +111,7 @@ def test_collect_estimate_rows_includes_all_branch_nodes_with_status() -> None:
         },
         total_selected_cases=2,
         successful_cases=1,
-        effective_judge_model=DEFAULT_PRIMARY_LLM,
+        effective_primary_model=DEFAULT_PRIMARY_LLM,
         llm_overrides={
             "models": {
                 "scan": DEFAULT_PRIMARY_LLM,
@@ -164,7 +149,7 @@ def test_collect_estimate_rows_excludes_eval_aggregator() -> None:
         node_stats={},
         total_selected_cases=1,
         successful_cases=1,
-        effective_judge_model=DEFAULT_PRIMARY_LLM,
+        effective_primary_model=DEFAULT_PRIMARY_LLM,
         llm_overrides={"models": {}, "fallback_models": {}},
     )
     row_names = [row[0] for row in rows]
@@ -250,7 +235,6 @@ def test_estimate_command_uses_estimate_execution_mode(monkeypatch: pytest.Monke
         adapter="auto",
         hf_config=None,
         hf_revision=None,
-        judge_model=DEFAULT_PRIMARY_LLM,
         llm_model=[],
         llm_fallback=[],
         continue_on_error=True,
@@ -304,7 +288,6 @@ def test_estimate_command_filters_ineligible_cases_for_grounding(
         adapter="auto",
         hf_config=None,
         hf_revision=None,
-        judge_model=DEFAULT_PRIMARY_LLM,
         llm_model=[],
         llm_fallback=[],
         continue_on_error=True,
@@ -366,7 +349,6 @@ def test_estimate_command_uses_all_selected_records_as_denominator(
         adapter="auto",
         hf_config=None,
         hf_revision=None,
-        judge_model=DEFAULT_PRIMARY_LLM,
         llm_model=[],
         llm_fallback=[],
         continue_on_error=True,
@@ -421,7 +403,6 @@ def test_run_command_filters_ineligible_cases_for_grounding(
         adapter="auto",
         hf_config=None,
         hf_revision=None,
-        judge_model=DEFAULT_PRIMARY_LLM,
         llm_model=[],
         llm_fallback=[],
         continue_on_error=True,
@@ -474,7 +455,6 @@ def test_run_command_does_not_prefetch_all_cases(monkeypatch: pytest.MonkeyPatch
         adapter="auto",
         hf_config=None,
         hf_revision=None,
-        judge_model=DEFAULT_PRIMARY_LLM,
         llm_model=[],
         llm_fallback=[],
         continue_on_error=True,
@@ -528,7 +508,6 @@ def test_run_command_sets_llm_concurrency(monkeypatch: pytest.MonkeyPatch) -> No
         adapter="auto",
         hf_config=None,
         hf_revision=None,
-        judge_model=DEFAULT_PRIMARY_LLM,
         llm_model=[],
         llm_fallback=[],
         continue_on_error=True,
@@ -603,7 +582,6 @@ def test_run_debug_summary_uses_per_node_eligible_counts(
         adapter="auto",
         hf_config=None,
         hf_revision=None,
-        judge_model=DEFAULT_PRIMARY_LLM,
         llm_model=[],
         llm_fallback=[],
         continue_on_error=True,
@@ -684,7 +662,6 @@ def test_run_command_passes_eval_collector_and_renders_from_snapshot(
         adapter="auto",
         hf_config=None,
         hf_revision=None,
-        judge_model=DEFAULT_PRIMARY_LLM,
         llm_model=[],
         llm_fallback=[],
         continue_on_error=True,
@@ -760,7 +737,6 @@ def test_run_command_writes_case_report_and_metric_breakdowns(
         adapter="auto",
         hf_config=None,
         hf_revision=None,
-        judge_model=DEFAULT_PRIMARY_LLM,
         llm_model=[],
         llm_fallback=[],
         continue_on_error=True,
@@ -826,7 +802,6 @@ def test_run_command_forwards_chunker_and_refiner_overrides(
         adapter="auto",
         hf_config=None,
         hf_revision=None,
-        judge_model=DEFAULT_PRIMARY_LLM,
         llm_model=[],
         llm_fallback=[],
         chunker="semchunk",

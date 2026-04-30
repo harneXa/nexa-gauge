@@ -69,12 +69,6 @@ def estimate(
         "--hf-revision",
         help="Optional Hugging Face dataset revision/tag/commit.",
     ),
-    judge_model: str = typer.Option(
-        DEFAULT_PRIMARY_LLM,
-        "--model",
-        "-m",
-        help="Global primary LLM model (backward-compatible alias of --llm-model MODEL).",
-    ),
     llm_model: list[str] = typer.Option(
         (),
         "--llm-model",
@@ -152,16 +146,15 @@ def estimate(
 
     target_node = _resolve_target_node(node_name)
 
-    effective_judge_model, llm_overrides, llm_warnings = _resolve_runtime_llm_overrides(
+    effective_primary_model, llm_overrides, llm_warnings = _resolve_runtime_llm_overrides(
         target_node=target_node,
-        legacy_model=judge_model,
         llm_model_values=llm_model,
         llm_fallback_values=llm_fallback,
     )
 
     _print_llm_routing_summary(
         target_node=target_node,
-        global_primary=effective_judge_model,
+        global_primary=effective_primary_model,
         llm_overrides=llm_overrides,
     )
     for warning in llm_warnings:
@@ -289,7 +282,7 @@ def estimate(
         node_stats=node_stats,
         total_selected_cases=total_selected_cases,
         successful_cases=successful_cases,
-        effective_judge_model=effective_judge_model,
+        effective_primary_model=effective_primary_model,
         llm_overrides=llm_overrides,
     )
     total_cost = sum(cost for *_, cost in rows)
