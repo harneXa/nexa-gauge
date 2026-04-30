@@ -30,7 +30,7 @@ Shape key:
 Edge labels encode the target node's `requires_*` input gates. Edges into `eval` are unlabeled because `eval` itself has no input requirements.
 
 ```mermaid
-%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 20}} }%%
+%%{init: {"flowchart": {"nodeSpacing": 18, "rankSpacing": 18}} }%%
 flowchart TD
     scan[scan]
 
@@ -95,14 +95,14 @@ flowchart TD
 
     %% Node colors — muted mid-tone palette, hue-matched to NodeSpec.color in topology.py
     style scan        fill:#7FC7D1,stroke:#3F7A82,color:#fff
-    style chunk_box   fill:#BBD3EE,stroke:#3F6A9C,color:#173B61
-    style refiner_box fill:#BFE3BF,stroke:#3F8A3F,color:#1B4C1B
+    style chunk_box   fill:#BBD3EE,stroke:#3F6A9C,color:#173B61,rx:10px,ry:10px,padding:4px
+    style refiner_box fill:#BFE3BF,stroke:#3F8A3F,color:#1B4C1B,rx:10px,ry:10px,padding:4px
     style chunk_semchunk   fill:#A7C2E4,stroke:#3F6A9C,color:#173B61,stroke-width:1px
     style chunk_more       fill:#A7C2E4,stroke:#3F6A9C,color:#173B61,stroke-width:1px
     style refiner_mmr      fill:#A6D7A6,stroke:#3F8A3F,color:#1B4C1B,stroke-width:1px
     style refiner_rerank   fill:#A6D7A6,stroke:#3F8A3F,color:#1B4C1B,stroke-width:1px
     style refiner_more     fill:#A6D7A6,stroke:#3F8A3F,color:#1B4C1B,stroke-width:1px
-    classDef strategySmall font-size:10px,stroke-width:1px;
+    classDef strategySmall font-size:9px,stroke-width:1px;
     class chunk_semchunk,chunk_more,refiner_mmr,refiner_rerank,refiner_more strategySmall
     style claims      fill:#C07AA8,stroke:#7A4469,color:#fff
     style geval_steps fill:#9FBF9F,stroke:#5F8A5F,color:#fff
