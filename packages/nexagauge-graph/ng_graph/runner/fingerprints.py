@@ -88,6 +88,9 @@ def _node_route_fingerprint(
         "model": resolved_model,
         "fallback_model": node_cfg.fallback_model,
         "temperature": node_cfg.temperature,
+        "chunker": state.get("chunker"),
+        "refiner": state.get("refiner"),
+        "refiner_top_k": state.get("refiner_top_k"),
     }
     return hashlib.sha256(_stable_json(payload).encode()).hexdigest()[:16]
 

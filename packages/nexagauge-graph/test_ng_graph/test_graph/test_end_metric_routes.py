@@ -47,11 +47,11 @@ _GROUP_KEY_TO_WRAPPER: dict[str, type] = {
 }
 
 _GROUP_KEY_TO_SECTION: dict[str, str] = {
-    "grounding_metrics": "grounding",
-    "relevance_metrics": "relevance",
-    "redteam_metrics": "redteam",
-    "geval_metrics": "geval",
-    "reference_metrics": "reference",
+    "grounding_metrics": "grounding_metrics",
+    "relevance_metrics": "relevance_metrics",
+    "redteam_metrics": "redteam_metrics",
+    "geval_metrics": "geval_metrics",
+    "reference_metrics": "reference_metrics",
 }
 
 
@@ -148,7 +148,13 @@ def test_report_for_eval_contains_all_metric_branches(
 
     assert isinstance(report, dict)
     assert report["target_node"] == "eval"
-    for section in ("grounding", "relevance", "redteam", "geval", "reference"):
+    for section in (
+        "grounding_metrics",
+        "relevance_metrics",
+        "redteam_metrics",
+        "geval_metrics",
+        "reference_metrics",
+    ):
         assert section in report, f"Expected section '{section}' in report"
         assert isinstance(report[section]["metrics"], list)
         assert len(report[section]["metrics"]) == 1
@@ -259,15 +265,17 @@ def test_report_for_grounding_target_includes_inputs_and_branch_nodes(graph_modu
             ],
             cost=CostEstimate(cost=0.001, input_tokens=10.0, output_tokens=3.0),
         ),
-        "generation_dedup_claims": ClaimArtifacts(
-            claims=[
-                Claim(
+        "generation_refined_chunks": ChunkArtifacts(
+            chunks=[
+                Chunk(
+                    index=0,
                     item=Item(text="Paris is the capital of France.", tokens=7.0),
-                    source_chunk_index=0,
-                    confidence=0.95,
+                    char_start=0,
+                    char_end=31,
+                    sha256="abc123",
                 )
             ],
-            cost=CostEstimate(cost=0.0, input_tokens=None, output_tokens=None),
+            cost=CostEstimate(cost=0.0, input_tokens=0.0, output_tokens=0.0),
         ),
         "grounding_metrics": graph_module.GroundingMetrics(
             metrics=[
@@ -308,16 +316,16 @@ def test_report_for_grounding_target_includes_inputs_and_branch_nodes(graph_modu
     assert report["input"]["reference"] == "Paris"
 
     # Chunk section
-    assert report["chunks"]["text"] == ["Paris is the capital of France."]
+    assert report["generation_chunk"]["text"] == ["Paris is the capital of France."]
 
     # Claims section
-    assert report["claims"]["text"] == ["Paris is the capital of France."]
-    assert report["claims"]["cost"]["cost"] == pytest.approx(0.001)
+    assert report["generation_claims"]["text"] == ["Paris is the capital of France."]
+    assert report["generation_claims"]["cost"]["cost"] == pytest.approx(0.001)
 
-    # Dedup claims section
-    assert report["claims_unique"]["text"] == ["Paris is the capital of France."]
+    # Refined chunks section
+    assert report["generation_refined_chunks"]["text"] == ["Paris is the capital of France."]
 
     # Grounding section
-    assert isinstance(report["grounding"]["metrics"], list)
-    assert len(report["grounding"]["metrics"]) == 1
-    assert report["grounding"]["cost"]["cost"] == pytest.approx(0.002)
+    assert isinstance(report["grounding_metrics"]["metrics"], list)
+    assert len(report["grounding_metrics"]["metrics"]) == 1
+    assert report["grounding_metrics"]["cost"]["cost"] == pytest.approx(0.002)

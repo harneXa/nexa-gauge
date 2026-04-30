@@ -96,7 +96,7 @@ def test_node_grounding_estimate_calls_estimate_without_claim_artifact(
             has_generation=True,
             has_context=False,
         ),
-        "generation_dedup_claims": None,
+        "generation_claims": None,
         "llm_overrides": llm_overrides,
     }
 
@@ -146,7 +146,7 @@ def test_node_relevance_estimate_calls_estimate_with_claims_and_question(
             has_generation=True,
             has_question=True,
         ),
-        "generation_dedup_claims": None,
+        "generation_claims": None,
         "llm_overrides": llm_overrides,
     }
 
@@ -187,8 +187,8 @@ def test_node_report_sets_cost_estimate_in_estimate_mode(graph_module) -> None:
     assert isinstance(report, dict)
     assert report["target_node"] == "eval"
     # Metric sections are absent when their state key is None
-    assert "grounding" not in report
-    assert "relevance" not in report
+    assert "grounding_metrics" not in report
+    assert "relevance_metrics" not in report
     assert out["cost_estimate"].cost == pytest.approx(0.3)
     assert out["cost_estimate"].input_tokens == 10.0
     assert out["cost_estimate"].output_tokens == 5.0

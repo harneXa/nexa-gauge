@@ -63,7 +63,7 @@ def test_resolve_runtime_llm_overrides_uses_defaults_for_branch() -> None:
     )
     assert warnings == []
 
-    expected_nodes = {"scan", "chunk", "claims", "dedup", "grounding"}
+    expected_nodes = {"scan", "chunk", "refiner", "claims", "grounding"}
     assert set(overrides["models"]) == expected_nodes
     assert set(overrides["fallback_models"]) == expected_nodes
     assert all(model == DEFAULT_PRIMARY_LLM for model in overrides["models"].values())
@@ -114,14 +114,14 @@ def test_collect_estimate_rows_includes_all_branch_nodes_with_status() -> None:
         cost_by_node={
             "chunk": CostEstimate(cost=0.15, input_tokens=10, output_tokens=2),
             "claims": CostEstimate(cost=0.0, input_tokens=0, output_tokens=0),
-            "dedup": CostEstimate(cost=0.0, input_tokens=0, output_tokens=0),
+            "refiner": CostEstimate(cost=0.0, input_tokens=0, output_tokens=0),
             "grounding": CostEstimate(cost=0.0, input_tokens=0, output_tokens=0),
         },
         node_stats={
             "scan": {"executed": 1, "cached": 0, "estimated": 0},
             "chunk": {"executed": 1, "cached": 0, "estimated": 1},
             "claims": {"executed": 1, "cached": 0, "estimated": 1},
-            "dedup": {"executed": 1, "cached": 0, "estimated": 1},
+            "refiner": {"executed": 1, "cached": 0, "estimated": 1},
             "grounding": {"executed": 0, "cached": 1, "estimated": 0},
         },
         total_selected_cases=2,
@@ -132,7 +132,7 @@ def test_collect_estimate_rows_includes_all_branch_nodes_with_status() -> None:
                 "scan": DEFAULT_PRIMARY_LLM,
                 "chunk": "openai/gpt-4o",
                 "claims": DEFAULT_PRIMARY_LLM,
-                "dedup": DEFAULT_PRIMARY_LLM,
+                "refiner": DEFAULT_PRIMARY_LLM,
                 "grounding": DEFAULT_PRIMARY_LLM,
             },
             "fallback_models": {},
@@ -142,8 +142,17 @@ def test_collect_estimate_rows_includes_all_branch_nodes_with_status() -> None:
     assert rows == [
         ("scan", DEFAULT_PRIMARY_LLM, "skipped/ineligible", "1 / 2", "0 / 2", "0 / 2", "0.0%", 0.0),
         ("chunk", "openai/gpt-4o", "billable", "1 / 2", "0 / 2", "0 / 2", "0.0%", 0.15),
+        (
+            "refiner",
+            DEFAULT_PRIMARY_LLM,
+            "zero_cost",
+            "1 / 2",
+            "0 / 2",
+            "0 / 2",
+            "0.0%",
+            0.0,
+        ),
         ("claims", DEFAULT_PRIMARY_LLM, "zero_cost", "1 / 2", "0 / 2", "0 / 2", "0.0%", 0.0),
-        ("dedup", DEFAULT_PRIMARY_LLM, "zero_cost", "1 / 2", "0 / 2", "0 / 2", "0.0%", 0.0),
         ("grounding", DEFAULT_PRIMARY_LLM, "cached_only", "0 / 2", "1 / 2", "0 / 2", "0.0%", 0.0),
     ]
 
@@ -774,3 +783,63 @@ def test_run_command_writes_case_report_and_metric_breakdowns(
     assert case_report["target_node"] == "eval"
     assert metrics_report["node"] == "grounding"
     assert metrics_report["summary"]["avg_score"] == pytest.approx(0.75)
+
+
+def test_run_command_forwards_chunker_and_refiner_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_case: dict[str, object] = {}
+
+    class _Adapter:
+        def iter_cases(self, split: str = "train", limit: int | None = None):
+            del split, limit
+            yield {"case_id": "c1", "generation": "hello", "context": "ctx"}
+
+    class _Runner:
+        def __init__(self, cache_store):
+            del cache_store
+
+        def run_cases_iter(self, **kwargs):
+            case = next(iter(kwargs["cases"]))
+            captured_case.update(case)
+            yield SimpleNamespace(
+                case_id=case["case_id"],
+                error=None,
+                result=SimpleNamespace(
+                    case_id=case["case_id"],
+                    executed_nodes=["scan"],
+                    cached_nodes=[],
+                    final_state={},
+                    node_timings={},
+                ),
+            )
+
+    monkeypatch.setattr(main_module, "create_dataset_adapter", lambda **kwargs: _Adapter())
+    monkeypatch.setattr(main_module, "CachedNodeRunner", _Runner)
+
+    main_module.run(
+        node_name="grounding",
+        input="dummy.json",
+        start=0,
+        end=None,
+        limit=1,
+        adapter="auto",
+        hf_config=None,
+        hf_revision=None,
+        judge_model=DEFAULT_PRIMARY_LLM,
+        llm_model=[],
+        llm_fallback=[],
+        chunker="semchunk",
+        refiner="mmr",
+        refiner_top_k=5,
+        continue_on_error=True,
+        max_workers=1,
+        max_in_flight=None,
+        force=False,
+        no_cache=True,
+        output_dir=None,
+    )
+
+    assert captured_case["chunker"] == "semchunk"
+    assert captured_case["refiner"] == "mmr"
+    assert captured_case["refiner_top_k"] == 5

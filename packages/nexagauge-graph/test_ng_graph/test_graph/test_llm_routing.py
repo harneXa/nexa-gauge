@@ -60,6 +60,10 @@ def test_node_generation_claims_uses_canonical_model_key(graph_module, monkeypat
             chunks=[_make_chunk("The Eiffel Tower is in Paris.")],
             cost=CostEstimate(cost=0.0, input_tokens=None, output_tokens=None),
         ),
+        "generation_refined_chunks": ChunkArtifacts(
+            chunks=[_make_chunk("The Eiffel Tower is in Paris.")],
+            cost=CostEstimate(cost=0.0, input_tokens=None, output_tokens=None),
+        ),
         "llm_overrides": llm_overrides,
     }
 
@@ -104,7 +108,7 @@ def test_node_grounding_uses_canonical_key_and_handles_missing_context(
             has_generation=True,
             has_context=False,
         ),
-        "generation_dedup_claims": ClaimArtifacts(
+        "generation_claims": ClaimArtifacts(
             claims=[Claim(item=Item(text="Paris is in France.", tokens=4), source_chunk_index=0)],
             cost=CostEstimate(cost=0.0, input_tokens=None, output_tokens=None),
         ),
