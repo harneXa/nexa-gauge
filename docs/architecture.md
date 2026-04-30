@@ -37,9 +37,9 @@ flowchart TD
     %% Strategy container: chunk (wide, short box)
     subgraph chunk_box["chunk"]
       direction LR
-      chunk_sem((sem))
+      chunk_semchunk((semchunk))
       chunk_more((...))
-      chunk_sem --- chunk_more
+      chunk_semchunk --- chunk_more
     end
 
     %% Strategy container: refiner (wide, short box)
@@ -97,13 +97,13 @@ flowchart TD
     style scan        fill:#7FC7D1,stroke:#3F7A82,color:#fff
     style chunk_box   fill:#BBD3EE,stroke:#3F6A9C,color:#173B61
     style refiner_box fill:#BFE3BF,stroke:#3F8A3F,color:#1B4C1B
-    style chunk_sem        fill:#A7C2E4,stroke:#3F6A9C,color:#173B61,stroke-width:1px
+    style chunk_semchunk   fill:#A7C2E4,stroke:#3F6A9C,color:#173B61,stroke-width:1px
     style chunk_more       fill:#A7C2E4,stroke:#3F6A9C,color:#173B61,stroke-width:1px
     style refiner_mmr      fill:#A6D7A6,stroke:#3F8A3F,color:#1B4C1B,stroke-width:1px
     style refiner_rerank   fill:#A6D7A6,stroke:#3F8A3F,color:#1B4C1B,stroke-width:1px
     style refiner_more     fill:#A6D7A6,stroke:#3F8A3F,color:#1B4C1B,stroke-width:1px
     classDef strategySmall font-size:10px,stroke-width:1px;
-    class chunk_sem,chunk_more,refiner_mmr,refiner_rerank,refiner_more strategySmall
+    class chunk_semchunk,chunk_more,refiner_mmr,refiner_rerank,refiner_more strategySmall
     style claims      fill:#C07AA8,stroke:#7A4469,color:#fff
     style geval_steps fill:#9FBF9F,stroke:#5F8A5F,color:#fff
     style relevance   fill:#8FCF7F,stroke:#4F8A3F,color:#fff
