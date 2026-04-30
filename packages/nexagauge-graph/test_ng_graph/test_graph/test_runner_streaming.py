@@ -32,8 +32,8 @@ def _install_fake_pipeline_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
     def _claims(_state: dict) -> dict:
         return {"claims_marker": "claims"}
 
-    def _dedup(_state: dict) -> dict:
-        return {"dedup_marker": "dedup"}
+    def _refiner(_state: dict) -> dict:
+        return {"refiner_marker": "refiner"}
 
     def _geval_steps(_state: dict) -> dict:
         return {"geval_steps_marker": "steps"}
@@ -90,7 +90,7 @@ def _install_fake_pipeline_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(runner_module.NODE_FNS, "scan", _scan)
     monkeypatch.setitem(runner_module.NODE_FNS, "chunk", _chunk)
     monkeypatch.setitem(runner_module.NODE_FNS, "claims", _claims)
-    monkeypatch.setitem(runner_module.NODE_FNS, "dedup", _dedup)
+    monkeypatch.setitem(runner_module.NODE_FNS, "refiner", _refiner)
     monkeypatch.setitem(runner_module.NODE_FNS, "geval_steps", _geval_steps)
     monkeypatch.setitem(runner_module.NODE_FNS, "grounding", _grounding)
     monkeypatch.setitem(runner_module.NODE_FNS, "relevance", _relevance)
@@ -196,7 +196,7 @@ def test_report_target_parallelizes_independent_branches(monkeypatch) -> None:
     monkeypatch.setitem(runner_module.NODE_FNS, "scan", _mk_node("scan", 0.01))
     monkeypatch.setitem(runner_module.NODE_FNS, "chunk", _mk_node("chunk", 0.12))
     monkeypatch.setitem(runner_module.NODE_FNS, "claims", _mk_node("claims", 0.12))
-    monkeypatch.setitem(runner_module.NODE_FNS, "dedup", _mk_node("dedup", 0.12))
+    monkeypatch.setitem(runner_module.NODE_FNS, "refiner", _mk_node("refiner", 0.12))
     monkeypatch.setitem(runner_module.NODE_FNS, "geval_steps", _mk_node("geval_steps", 0.15))
     monkeypatch.setitem(runner_module.NODE_FNS, "relevance", _mk_node("relevance", 0.05))
     monkeypatch.setitem(runner_module.NODE_FNS, "grounding", _mk_node("grounding", 0.05))
@@ -216,8 +216,8 @@ def test_report_target_parallelizes_independent_branches(monkeypatch) -> None:
 
     assert "redteam" in result.executed_nodes
     assert "reference" in result.executed_nodes
-    assert timestamps["redteam_start"] < timestamps["dedup_end"]
-    assert timestamps["reference_start"] < timestamps["dedup_end"]
+    assert timestamps["redteam_start"] < timestamps["refiner_end"]
+    assert timestamps["reference_start"] < timestamps["refiner_end"]
 
 
 def test_dependent_snapshot_includes_unmerged_prereq_outputs(monkeypatch) -> None:
@@ -235,8 +235,8 @@ def test_dependent_snapshot_includes_unmerged_prereq_outputs(monkeypatch) -> Non
     def _claims(_state: dict) -> dict:
         return {"claims_marker": "claims"}
 
-    def _dedup(_state: dict) -> dict:
-        return {"dedup_marker": "dedup"}
+    def _refiner(_state: dict) -> dict:
+        return {"refiner_marker": "refiner"}
 
     def _geval_steps(_state: dict) -> dict:
         time.sleep(0.01)
@@ -267,7 +267,7 @@ def test_dependent_snapshot_includes_unmerged_prereq_outputs(monkeypatch) -> Non
     monkeypatch.setitem(runner_module.NODE_FNS, "scan", _scan)
     monkeypatch.setitem(runner_module.NODE_FNS, "chunk", _chunk)
     monkeypatch.setitem(runner_module.NODE_FNS, "claims", _claims)
-    monkeypatch.setitem(runner_module.NODE_FNS, "dedup", _dedup)
+    monkeypatch.setitem(runner_module.NODE_FNS, "refiner", _refiner)
     monkeypatch.setitem(runner_module.NODE_FNS, "geval_steps", _geval_steps)
     monkeypatch.setitem(runner_module.NODE_FNS, "geval", _geval)
     monkeypatch.setitem(runner_module.NODE_FNS, "grounding", _grounding)
@@ -300,8 +300,8 @@ def test_estimate_mode_reuses_run_cache_for_shared_prerequisites(monkeypatch, tm
     def _fake_claims(_state: dict) -> dict:
         return {"claims_marker": "claims"}
 
-    def _fake_dedup(_state: dict) -> dict:
-        return {"dedup_marker": "dedup"}
+    def _fake_refiner(_state: dict) -> dict:
+        return {"refiner_marker": "refiner"}
 
     def _fake_grounding(_state: dict) -> dict:
         return {"grounding_marker": "grounded"}
@@ -319,7 +319,7 @@ def test_estimate_mode_reuses_run_cache_for_shared_prerequisites(monkeypatch, tm
     monkeypatch.setitem(runner_module.NODE_FNS, "scan", _fake_scan)
     monkeypatch.setitem(runner_module.NODE_FNS, "chunk", _fake_chunk)
     monkeypatch.setitem(runner_module.NODE_FNS, "claims", _fake_claims)
-    monkeypatch.setitem(runner_module.NODE_FNS, "dedup", _fake_dedup)
+    monkeypatch.setitem(runner_module.NODE_FNS, "refiner", _fake_refiner)
     monkeypatch.setitem(runner_module.NODE_FNS, "grounding", _fake_grounding)
     monkeypatch.setitem(runner_module.NODE_FNS, "relevance", _fake_relevance)
 
@@ -330,7 +330,7 @@ def test_estimate_mode_reuses_run_cache_for_shared_prerequisites(monkeypatch, tm
     assert "grounding" in run_result.executed_nodes
 
     estimate_result = runner.run_case(case=case, node_name="relevance", execution_mode="estimate")
-    assert set(["scan", "chunk", "claims", "dedup"]).issubset(set(estimate_result.cached_nodes))
+    assert set(["scan", "chunk", "refiner", "claims"]).issubset(set(estimate_result.cached_nodes))
     assert "relevance" in estimate_result.executed_nodes
     assert estimate_result.final_state["estimated_costs"]["relevance"].cost == 0.25
 
@@ -359,15 +359,15 @@ def test_estimate_mode_only_executes_for_uncached_new_records(monkeypatch, tmp_p
             }
         return {"claims_marker": "claims"}
 
-    def _fake_dedup(state: dict) -> dict:
+    def _fake_refiner(state: dict) -> dict:
         if state.get("execution_mode") == "estimate":
             return {
-                "dedup_marker": "dedup",
+                "refiner_marker": "refiner",
                 "estimated_costs": {
-                    "dedup": CostEstimate(cost=0.0, input_tokens=0, output_tokens=0)
+                    "refiner": CostEstimate(cost=0.0, input_tokens=0, output_tokens=0)
                 },
             }
-        return {"dedup_marker": "dedup"}
+        return {"refiner_marker": "refiner"}
 
     def _fake_grounding(state: dict) -> dict:
         if state.get("execution_mode") == "estimate":
@@ -382,7 +382,7 @@ def test_estimate_mode_only_executes_for_uncached_new_records(monkeypatch, tmp_p
     monkeypatch.setitem(runner_module.NODE_FNS, "scan", _fake_scan)
     monkeypatch.setitem(runner_module.NODE_FNS, "chunk", _fake_chunk)
     monkeypatch.setitem(runner_module.NODE_FNS, "claims", _fake_claims)
-    monkeypatch.setitem(runner_module.NODE_FNS, "dedup", _fake_dedup)
+    monkeypatch.setitem(runner_module.NODE_FNS, "refiner", _fake_refiner)
     monkeypatch.setitem(runner_module.NODE_FNS, "grounding", _fake_grounding)
 
     runner = CachedNodeRunner(cache_store=CacheStore(tmp_path))
@@ -458,7 +458,7 @@ def test_eval_estimate_mode_merges_parallel_metric_estimated_costs(monkeypatch) 
     monkeypatch.setitem(runner_module.NODE_FNS, "scan", _ok)
     monkeypatch.setitem(runner_module.NODE_FNS, "chunk", _ok)
     monkeypatch.setitem(runner_module.NODE_FNS, "claims", _ok)
-    monkeypatch.setitem(runner_module.NODE_FNS, "dedup", _ok)
+    monkeypatch.setitem(runner_module.NODE_FNS, "refiner", _ok)
     monkeypatch.setitem(runner_module.NODE_FNS, "geval_steps", _ok)
     monkeypatch.setitem(runner_module.NODE_FNS, "relevance", _relevance)
     monkeypatch.setitem(runner_module.NODE_FNS, "grounding", _grounding)
@@ -496,10 +496,10 @@ def test_estimate_mode_does_not_write_cache_by_default(monkeypatch, tmp_path) ->
             "estimated_costs": {"claims": CostEstimate(cost=0.2, input_tokens=8, output_tokens=2)},
         }
 
-    def _fake_dedup(_state: dict) -> dict:
+    def _fake_refiner(_state: dict) -> dict:
         return {
-            "dedup_marker": "dedup",
-            "estimated_costs": {"dedup": CostEstimate(cost=0.0, input_tokens=0, output_tokens=0)},
+            "refiner_marker": "refiner",
+            "estimated_costs": {"refiner": CostEstimate(cost=0.0, input_tokens=0, output_tokens=0)},
         }
 
     def _fake_grounding(_state: dict) -> dict:
@@ -513,7 +513,7 @@ def test_estimate_mode_does_not_write_cache_by_default(monkeypatch, tmp_path) ->
     monkeypatch.setitem(runner_module.NODE_FNS, "scan", _fake_scan)
     monkeypatch.setitem(runner_module.NODE_FNS, "chunk", _fake_chunk)
     monkeypatch.setitem(runner_module.NODE_FNS, "claims", _fake_claims)
-    monkeypatch.setitem(runner_module.NODE_FNS, "dedup", _fake_dedup)
+    monkeypatch.setitem(runner_module.NODE_FNS, "refiner", _fake_refiner)
     monkeypatch.setitem(runner_module.NODE_FNS, "grounding", _fake_grounding)
 
     runner = CachedNodeRunner(cache_store=CacheStore(tmp_path))

@@ -99,8 +99,8 @@ def _run_mocked_graph_eval() -> None:
     def fake_claims(_state: dict[str, Any]) -> dict[str, Any]:
         return {"generation_claims": {"claims": [{"id": "c1"}], "cost": []}}
 
-    def fake_dedup(_state: dict[str, Any]) -> dict[str, Any]:
-        return {"generation_dedup_claims": {"claims": [{"id": "c1"}], "cost": []}}
+    def fake_refiner(_state: dict[str, Any]) -> dict[str, Any]:
+        return {"generation_refined_chunks": {"chunks": [{"text": "chunk-1"}], "cost": []}}
 
     def fake_geval_steps(_state: dict[str, Any]) -> dict[str, Any]:
         return {"geval_steps_by_signature": {}}
@@ -150,7 +150,7 @@ def _run_mocked_graph_eval() -> None:
     graph.node_metadata_scanner = fake_scan
     graph.node_generation_chunk = fake_chunk
     graph.node_generation_claims = fake_claims
-    graph.node_generation_claims_dedup = fake_dedup
+    graph.node_generation_refiner = fake_refiner
     graph.node_geval_steps = fake_geval_steps
     graph.node_relevance = fake_relevance
     graph.node_grounding = fake_grounding

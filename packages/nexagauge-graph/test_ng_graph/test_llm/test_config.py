@@ -7,11 +7,10 @@ import pytest
 from ng_graph.llm.config import get_judge_model, normalize_node_name
 
 
-def test_normalize_node_name_aliases() -> None:
+def test_normalize_node_name() -> None:
     assert normalize_node_name("claims") == "claims"
-    assert normalize_node_name("node_claims") == "claims"
-    assert normalize_node_name("generation_claims") == "claims"
-    assert normalize_node_name("node_grounding") == "grounding"
+    assert normalize_node_name("refiner") == "refiner"
+    assert normalize_node_name("Refiner") == "refiner"
 
 
 def test_get_judge_model_prefers_runtime_over_env(monkeypatch: pytest.MonkeyPatch) -> None:

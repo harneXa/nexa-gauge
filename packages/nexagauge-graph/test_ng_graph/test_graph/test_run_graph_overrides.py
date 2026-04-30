@@ -164,14 +164,15 @@ def test_graph_forwards_llm_overrides_to_nodes(graph_module, monkeypatch) -> Non
             chunks=[chunk],
             cost=CostEstimate(cost=0.0, input_tokens=None, output_tokens=None),
         ),
+        "generation_refined_chunks": ChunkArtifacts(
+            chunks=[chunk],
+            cost=CostEstimate(cost=0.0, input_tokens=None, output_tokens=None),
+        ),
     }
 
     claims_out = graph_module.node_generation_claims(base_state)["generation_claims"]
-    dedup_out = graph_module.node_generation_claims_dedup(
-        {**base_state, "generation_claims": claims_out}
-    )["generation_dedup_claims"]
-    graph_module.node_grounding({**base_state, "generation_dedup_claims": dedup_out})
-    graph_module.node_relevance({**base_state, "generation_dedup_claims": dedup_out})
+    graph_module.node_grounding({**base_state, "generation_claims": claims_out})
+    graph_module.node_relevance({**base_state, "generation_claims": claims_out})
     graph_module.node_redteam(base_state)
     steps_out = graph_module.node_geval_steps(base_state)["geval_steps"]
     graph_module.node_geval({**base_state, "geval_steps": steps_out})
